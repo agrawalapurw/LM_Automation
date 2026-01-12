@@ -4,6 +4,7 @@ import pandas as pd
 from extractor.outlook import OutlookClient
 from extractor.parser import EmailParser
 from extractor.excel_writer import ExcelWriter
+from extractor.email_mover import EmailMover
 
 
 DEFAULT_FILTERS = ["Pre-MQL ready for review", "Pre-MQL ready for validation"]
@@ -77,6 +78,10 @@ def main():
         custom = input("Enter keywords (comma-separated, blank for no filter): ").strip()
         filters = [x.strip() for x in custom.split(",") if x.strip()] if custom else []
     
+    # Ask about moving emails
+    should_move = input("\nMove emails to distribution partner folders? [Y/n]: ").strip().lower()
+    move_emails = should_move in ("", "y", "yes")
+    
     # Fetch and parse emails
     print("\nFetching emails...")
     emails = outlook.fetch_emails(folder, date_ranges, filters)
@@ -110,6 +115,19 @@ def main():
     print(f"\n✓ Saved to: {filename}")
     print(f"  - Validation sheet: {len(df_validation)} rows")
     print(f"  - Review sheet: {len(df_review)} rows")
+    
+    # Move emails if requested
+    if move_emails:
+        mover = EmailMover(outlook)
+        
+        # Get MQL subfolders
+        subfolders = mover.get_mql_subfolders(store)
+        
+        if subfolders:
+            print(f"\nFound {len(subfolders)} subfolders in MQL")
+            mover.process_emails(emails, rows, subfolders)
+        else:
+            print("\nCould not find MQL subfolders. Skipping email moving.")
 
 
 if __name__ == "__main__":
