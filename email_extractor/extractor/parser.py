@@ -35,9 +35,10 @@ FIELDS = [
     "Take Action",
     "Valid Company → Reject Reason",
     "Invalid Company Reason",
-    "Reject Reason",                      # NEW for Review sheet
+    "Reject Reason",
     "Additional Scoring Information",
-    "Send to"
+    "Send to",
+    "Move to Folder"  # NEW
 ]
 
 
