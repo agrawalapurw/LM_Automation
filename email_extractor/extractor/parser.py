@@ -31,7 +31,12 @@ FIELDS = [
     "Has Contact Sales Form",
     "Status",
     "Action Taken",
-    "Company Domain Validation"  # NEW
+    "Company Domain Validation",
+    "Take Action",                            # NEW
+    "Valid Company → Reject Reason",          # NEW
+    "Invalid Company Reason",                 # NEW
+    "Additional Scoring Information",         # NEW
+    "Send to"                                 # NEW
 ]
 
 
