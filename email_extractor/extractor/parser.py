@@ -27,7 +27,9 @@ FIELDS = [
     "Company Matching Status",
     "Potential Distribution Partner (matching in beta testing)", "Digital activity",
     "Eloqua Profiler", "Initial Call Notes",
-    "Has Contact Sales Form"  # NEW COLUMN
+    "Has Contact Sales Form",
+    "Status",           # NEW
+    "Action Taken"      # NEW
 ]
 
 

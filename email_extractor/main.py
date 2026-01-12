@@ -93,6 +93,35 @@ def main():
     print(f"Found {len(emails)} emails. Parsing...")
     rows = [parser.parse_email(email) for email in emails]
     
+    # Move emails if requested and update status
+    status_map = {}
+    if move_emails:
+        mover = EmailMover(outlook)
+        subfolders = mover.get_mql_subfolders(store)
+        
+        if subfolders:
+            print(f"\nFound {len(subfolders)} subfolders in MQL")
+            status_map = mover.process_emails(emails, rows, subfolders)
+        else:
+            print("\nCould not find MQL subfolders. Skipping email moving.")
+            # Mark all as not processed
+            for i in range(len(rows)):
+                status_map[i] = ("Not Started", "Email moving was skipped")
+    else:
+        # Mark all as not processed
+        for i in range(len(rows)):
+            status_map[i] = ("Not Started", "Email moving was not requested")
+    
+    # Update rows with status information
+    for i, row in enumerate(rows):
+        if i in status_map:
+            status, action = status_map[i]
+            row["Status"] = status
+            row["Action Taken"] = action
+        else:
+            row["Status"] = "Not Started"
+            row["Action Taken"] = "No action taken"
+    
     # Create DataFrame
     df = pd.DataFrame(rows)
     
@@ -115,19 +144,6 @@ def main():
     print(f"\n✓ Saved to: {filename}")
     print(f"  - Validation sheet: {len(df_validation)} rows")
     print(f"  - Review sheet: {len(df_review)} rows")
-    
-    # Move emails if requested
-    if move_emails:
-        mover = EmailMover(outlook)
-        
-        # Get MQL subfolders
-        subfolders = mover.get_mql_subfolders(store)
-        
-        if subfolders:
-            print(f"\nFound {len(subfolders)} subfolders in MQL")
-            mover.process_emails(emails, rows, subfolders)
-        else:
-            print("\nCould not find MQL subfolders. Skipping email moving.")
 
 
 if __name__ == "__main__":

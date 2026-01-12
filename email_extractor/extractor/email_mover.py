@@ -150,37 +150,40 @@ class EmailMover:
                 except:
                     print("Invalid input.")
     
-    def determine_target_folder(self, row: Dict[str, str]) -> str:
-        """Determine which folder the email should be moved to."""
+    def determine_target_folder(self, row: Dict[str, str]) -> tuple:
+        """Determine which folder the email should be moved to.
+        
+        Returns:
+            tuple: (folder_name, action_description) or (None, reason_for_skip)
+        """
         has_contact_form = row.get("Has Contact Sales Form", "").strip()
         potential_partner = row.get("Potential Distribution Partner (matching in beta testing)", "").strip()
         
         # Only move if Has Contact Sales Form = No
         if has_contact_form != "No":
-            return None
+            return (None, f"Skipped - Has Contact Sales Form: {has_contact_form}")
         
         # Normalize potential partner value
         partner_upper = potential_partner.upper()
         
         # Skip if empty or just "?"
         if not potential_partner or potential_partner == "?":
-            return None
+            return (None, f"Skipped - No distribution partner identified")
         
         # Check for specific partners
         if "ARROW" in partner_upper:
-            return "ARROW"
+            return ("ARROW", f"Moved to Arrow folder - Partner: {potential_partner}")
         elif "FUTURE" in partner_upper:
-            return "FUTURE"
+            return ("FUTURE", f"Moved to Future folder - Partner: {potential_partner}")
         elif "RUTRONIK" in partner_upper:
-            return "RUTRONIK"
+            return ("RUTRONIK", f"Moved to Rutronik folder - Partner: {potential_partner}")
         elif "AVNET" in partner_upper:
-            # Skip AVNET
-            return None
+            return (None, f"Skipped - AVNET partner")
         else:
             # Any other distribution partner
-            return "OTHER DISTRIBUTION PARTNERS"
+            return ("OTHER DISTRIBUTION PARTNERS", f"Moved to Other Distribution Partners folder - Partner: {potential_partner}")
         
-        return None
+        return (None, "Skipped - No matching criteria")
     
     def move_email(self, email_item, target_folder):
         """Move an email to the target folder."""
@@ -192,10 +195,19 @@ class EmailMover:
             return False
     
     def process_emails(self, emails: List, parsed_data: List[Dict], subfolders: Dict):
-        """Process and move emails based on rules."""
+        """Process and move emails based on rules.
+        
+        Returns:
+            dict: Mapping of email index to status information
+        """
+        status_map = {}  # Maps index to (status, action)
+        
         if not subfolders:
             print("No subfolders available for moving emails")
-            return
+            # Mark all as not processed
+            for i in range(len(emails)):
+                status_map[i] = ("Not Started", "Email moving disabled - No MQL subfolders found")
+            return status_map
         
         # Create folder mapping
         folder_map = {
@@ -222,38 +234,45 @@ class EmailMover:
         
         print("\nProcessing emails for moving...")
         
-        for email_item, row_data in zip(emails, parsed_data):
-            target_name = self.determine_target_folder(row_data)
+        for i, (email_item, row_data) in enumerate(zip(emails, parsed_data)):
+            target_name, action_desc = self.determine_target_folder(row_data)
             
             if not target_name:
+                # Email was skipped
                 stats["SKIPPED"] += 1
+                status_map[i] = ("Not Started", action_desc)
                 continue
             
             target_folder = folder_map.get(target_name)
             
             if not target_folder:
-                print(f"Warning: Folder '{target_name}' not found")
+                # Folder not found
+                action = f"Failed - Target folder '{target_name}' not found"
+                print(f"Warning: {action}")
                 stats["FAILED"] += 1
+                status_map[i] = ("Failed", action)
                 continue
             
             # Move the email
             subject = row_data.get("Subject", "Unknown")
-            partner = row_data.get("Potential Distribution Partner (matching in beta testing)", "")
             
             if self.move_email(email_item, target_folder):
                 stats[target_name] += 1
+                status_map[i] = ("Completed", action_desc)
                 self.move_log.append({
+                    "index": i,
                     "subject": subject,
-                    "partner": partner,
                     "to_folder": target_name,
                     "status": "success"
                 })
-                print(f"  ✓ Moved to {target_name}: {subject[:40]}... (Partner: {partner})")
+                print(f"  ✓ {action_desc[:70]}...")
             else:
+                action = f"Failed - Could not move to {target_name}"
                 stats["FAILED"] += 1
+                status_map[i] = ("Failed", action)
                 self.move_log.append({
+                    "index": i,
                     "subject": subject,
-                    "partner": partner,
                     "to_folder": target_name,
                     "status": "failed"
                 })
@@ -270,4 +289,4 @@ class EmailMover:
         print(f"  Failed:                      {stats['FAILED']}")
         print("=" * 60)
         
-        return stats
+        return status_map
