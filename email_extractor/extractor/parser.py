@@ -24,8 +24,10 @@ FIELDS = [
     "Lead Source Name - Most Recent", "Lead Source Name - Original", "Lead Trigger",
     "Lead Lifecycle Count", "Account Type", "Lead Lifecycle ID", "Lead editor",
     "Subject Line", "Notification", "PreMQL review/validation link",
+    "Company Matching Status",
     "Potential Distribution Partner (matching in beta testing)", "Digital activity",
-    "Eloqua Profiler", "Initial Call Notes"
+    "Eloqua Profiler", "Initial Call Notes",
+    "Has Contact Sales Form"  # NEW COLUMN
 ]
 
 
@@ -58,7 +60,33 @@ class EmailParser:
             if field not in row:
                 row[field] = data.get(field, "")
         
+        # NEW: Check for contact_sales_forms in Lead Triggering Activities
+        row["Has Contact Sales Form"] = self._check_contact_sales_form(row.get("Lead Triggering Activities", ""))
+        
         return row
+    
+    def _check_contact_sales_form(self, triggering_activities: str) -> str:
+        """Check if Lead Triggering Activities contains contact_sales_forms."""
+        if not triggering_activities:
+            return "No"
+        
+        # Check for various patterns
+        lower_activities = triggering_activities.lower()
+        
+        patterns = [
+            "contact_sales_forms",
+            "contact sales forms",
+            "contact_sales_form",
+            "contact sales form",
+            "contactsalesforms",
+            "contactsalesform"
+        ]
+        
+        for pattern in patterns:
+            if pattern in lower_activities:
+                return "Yes"
+        
+        return "No"
     
     def _parse_html(self, html: str) -> Dict[str, str]:
         """Extract fields from HTML body."""
@@ -81,7 +109,9 @@ class EmailParser:
                         else:
                             data[label] = value
                     elif value:
-                        data[label] = value
+                        # Clean the value
+                        cleaned_value = self._clean_value(value)
+                        data[label] = cleaned_value
         
         # Extract links
         for anchor in soup.find_all("a"):
@@ -107,12 +137,18 @@ class EmailParser:
         buffer = []
         
         for line in lines:
+            # Stop at Copyright
+            if line.startswith("Copyright"):
+                break
+            
             # Check if line is a field label
             normalized = self._normalize_label(line)
             if normalized in FIELDS:
                 # Save previous field
                 if current_field and buffer:
-                    data[current_field] = "\n".join(buffer).strip()
+                    value = "\n".join(buffer).strip()
+                    cleaned_value = self._clean_value(value)
+                    data[current_field] = cleaned_value
                 current_field = normalized
                 buffer = []
             elif current_field:
@@ -120,7 +156,24 @@ class EmailParser:
         
         # Save last field
         if current_field and buffer:
-            data[current_field] = "\n".join(buffer).strip()
+            value = "\n".join(buffer).strip()
+            cleaned_value = self._clean_value(value)
+            data[current_field] = cleaned_value
+        
+        # Split PreMQL link and Company Matching Status
+        if "PreMQL review/validation link" in data:
+            value = data["PreMQL review/validation link"]
+            # Check if it contains "Company Matching Status"
+            if "Company Matching Status" in value:
+                parts = value.split("\n")
+                # First part is the URL
+                url_part = parts[0].strip()
+                data["PreMQL review/validation link"] = url_part
+                # Everything after is Company Matching Status
+                if len(parts) > 1:
+                    status_parts = [p.strip() for p in parts[1:] if p.strip() and "Company Matching Status" not in p]
+                    if status_parts:
+                        data["Company Matching Status"] = status_parts[0]
         
         # Find links in text
         if "PreMQL review/validation link" not in data:
@@ -133,6 +186,34 @@ class EmailParser:
                         break
         
         return data
+    
+    def _clean_value(self, value: str) -> str:
+        """Clean extracted value from unwanted content."""
+        if not value:
+            return ""
+        
+        # Remove everything after Copyright
+        if "Copyright" in value:
+            value = value.split("Copyright")[0].strip()
+        
+        # Remove Oracle footer patterns
+        value = re.sub(r'Copyright.*?All rights reserved\.?', '', value, flags=re.DOTALL | re.IGNORECASE)
+        value = re.sub(r'Oracle and/or its affiliates\.?', '', value, flags=re.IGNORECASE)
+        
+        # Remove image URLs and tracking pixels
+        value = re.sub(r'<https?://[^>]+>', '', value)
+        value = re.sub(r'https?://[^\s]*tinydot\.gif[^\s]*', '', value)
+        value = re.sub(r'https?://img\d+\.en25\.com[^\s]*', '', value)
+        
+        # Remove "Company Matching Status" label if it's standalone
+        if value.strip() == "Company Matching Status":
+            return ""
+        
+        # Clean up whitespace
+        lines = [l.strip() for l in value.splitlines() if l.strip()]
+        value = "\n".join(lines)
+        
+        return value.strip()
     
     def _normalize_label(self, text: str) -> str:
         """Normalize field label."""
