@@ -114,6 +114,10 @@ def main():
     
     # Update rows with status information
     for i, row in enumerate(rows):
+        # Don't override if already marked as University Contact
+        if row.get("Status") == "University Contact":
+            continue
+        
         if i in status_map:
             status, action = status_map[i]
             row["Status"] = status

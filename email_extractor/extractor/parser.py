@@ -1,6 +1,7 @@
 import re
 from typing import Dict
 from urllib.parse import urlparse, parse_qs, unquote
+from extractor.university_detector import UniversityDetector
 
 try:
     from bs4 import BeautifulSoup
@@ -34,6 +35,9 @@ FIELDS = [
 
 
 class EmailParser:
+    def __init__(self):
+        self.university_detector = UniversityDetector()
+    
     def parse_email(self, email_item) -> Dict[str, str]:
         """Parse Outlook email item into structured data."""
         subject = getattr(email_item, "Subject", "") or ""
@@ -62,8 +66,23 @@ class EmailParser:
             if field not in row:
                 row[field] = data.get(field, "")
         
-        # NEW: Check for contact_sales_forms in Lead Triggering Activities
+        # Check for contact_sales_forms
         row["Has Contact Sales Form"] = self._check_contact_sales_form(row.get("Lead Triggering Activities", ""))
+        
+        # NEW: Check for university
+        company = row.get("Company", "")
+        country = row.get("Country", "")
+        email = row.get("Email Address", "")
+        
+        university_result = self.university_detector.is_university(company, country, email)
+        
+        if university_result["is_university"]:
+            row["Status"] = "University Contact"
+            row["Action Taken"] = f"Identified as university - {university_result['reason']} (Confidence: {university_result['confidence']})"
+        else:
+            # Will be updated by email mover if applicable
+            row["Status"] = "Not Started"
+            row["Action Taken"] = ""
         
         return row
     
