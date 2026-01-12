@@ -14,7 +14,7 @@ TAKE_ACTION_VALIDATION = [
     "Invalid Company"
 ]
 
-VALID_REJECT_REASONS = [
+VALID_REJECT_REASONS_VALIDATION = [
     "Not able to contact",
     "Not a Disti lead",
     "Contacted - no general potential",
@@ -35,6 +35,24 @@ INVALID_COMPANY_REASONS = [
     "Competitor"
 ]
 
+# Dropdown options for Review sheet
+TAKE_ACTION_REVIEW = [
+    "MQL - Send to Sales",
+    "Reject"
+]
+
+REJECT_REASONS_REVIEW = [
+    "Not able to contact",
+    "Not a Disti lead",
+    "Contacted - no general potential",
+    "Contacted - no current potential",
+    "Not contacted - no general potential",
+    "Insufficient lead profile information",
+    "Lead already known",
+    "University Contact",
+    "Distribution Partner"
+]
+
 # Workflow columns for each sheet
 VALIDATION_WORKFLOW_COLS = [
     "Take Action",
@@ -47,6 +65,10 @@ VALIDATION_WORKFLOW_COLS = [
 ]
 
 REVIEW_WORKFLOW_COLS = [
+    "Take Action",
+    "Reject Reason",
+    "Additional Scoring Information",
+    "Send to",
     "Status",
     "Action Taken"
 ]
@@ -63,39 +85,17 @@ class ExcelWriter:
         if "Sheet" in wb.sheetnames:
             wb.remove(wb["Sheet"])
         
-        # Create hidden Lists sheet for dropdown data
-        self._create_lists_sheet(wb)
-        
-        # Write Validation sheet with special columns
+        # Write Validation sheet
         if not df_validation.empty:
             ws_val = wb.create_sheet("Validation")
             self._write_validation_sheet(ws_val, df_validation)
         
-        # Write Review sheet (standard, different columns)
+        # Write Review sheet
         if not df_review.empty:
             ws_rev = wb.create_sheet("Review")
             self._write_review_sheet(ws_rev, df_review)
         
         wb.save(filepath)
-    
-    def _create_lists_sheet(self, wb: Workbook):
-        """Create a hidden sheet with dropdown list values."""
-        lists = wb.create_sheet("Lists")
-        lists.sheet_state = "hidden"
-        
-        # Column A: Take Action options (Validation)
-        for i, value in enumerate(TAKE_ACTION_VALIDATION, start=1):
-            lists.cell(row=i, column=1, value=value)
-        
-        # Column B: Valid Company → Reject reasons
-        for i, value in enumerate(VALID_REJECT_REASONS, start=1):
-            lists.cell(row=i, column=2, value=value)
-        
-        # Column C: Invalid Company reasons
-        for i, value in enumerate(INVALID_COMPANY_REASONS, start=1):
-            lists.cell(row=i, column=3, value=value)
-        
-        return lists
     
     def _write_validation_sheet(self, worksheet, df: pd.DataFrame):
         """Write Validation sheet with special columns and dropdowns."""
@@ -104,6 +104,10 @@ class ExcelWriter:
         for col in VALIDATION_WORKFLOW_COLS:
             if col not in df.columns:
                 df[col] = ""
+        
+        # Remove review-specific columns if they exist
+        if "Reject Reason" in df.columns:
+            df = df.drop(columns=["Reject Reason"])
         
         # Reorder columns: data columns first, then workflow columns at the end
         data_columns = [col for col in df.columns if col not in VALIDATION_WORKFLOW_COLS]
@@ -144,7 +148,7 @@ class ExcelWriter:
         valid_reject_letter = get_column_letter(valid_reject_idx)
         dv2 = DataValidation(
             type="list",
-            formula1=f'"' + ','.join(VALID_REJECT_REASONS) + '"',
+            formula1=f'"' + ','.join(VALID_REJECT_REASONS_VALIDATION) + '"',
             allow_blank=True
         )
         worksheet.add_data_validation(dv2)
@@ -181,7 +185,7 @@ class ExcelWriter:
         self._adjust_column_widths(worksheet)
     
     def _write_review_sheet(self, worksheet, df: pd.DataFrame):
-        """Write Review sheet with standard workflow columns (no validation columns)."""
+        """Write Review sheet with Take Action and Reject Reason dropdowns."""
         
         # Add review-specific workflow columns if they don't exist
         for col in REVIEW_WORKFLOW_COLS:
@@ -190,11 +194,8 @@ class ExcelWriter:
         
         # Remove validation-specific columns if they exist
         validation_specific = [
-            "Take Action",
             "Valid Company → Reject Reason",
-            "Invalid Company Reason",
-            "Additional Scoring Information",
-            "Send to"
+            "Invalid Company Reason"
         ]
         df = df.drop(columns=[col for col in validation_specific if col in df.columns])
         
@@ -203,9 +204,54 @@ class ExcelWriter:
         ordered_columns = data_columns + REVIEW_WORKFLOW_COLS
         df = df[ordered_columns]
         
-        # Write data
-        for row in dataframe_to_rows(df, index=False, header=True):
-            worksheet.append(row)
+        # Write headers
+        headers = list(df.columns)
+        worksheet.append(headers)
+        
+        # Write data rows
+        for _, row in df.iterrows():
+            worksheet.append([row[col] for col in headers])
+        
+        # Get column indices for workflow columns
+        take_action_idx = headers.index("Take Action") + 1
+        reject_reason_idx = headers.index("Reject Reason") + 1
+        additional_info_idx = headers.index("Additional Scoring Information") + 1
+        send_to_idx = headers.index("Send to") + 1
+        
+        last_row = worksheet.max_row
+        
+        # Add dropdowns
+        print(f"Adding dropdowns to Review sheet (rows 2-{last_row})...")
+        
+        # Take Action dropdown
+        take_action_letter = get_column_letter(take_action_idx)
+        dv1 = DataValidation(
+            type="list",
+            formula1=f'"' + ','.join(TAKE_ACTION_REVIEW) + '"',
+            allow_blank=True
+        )
+        worksheet.add_data_validation(dv1)
+        dv1.add(f"{take_action_letter}2:{take_action_letter}{last_row}")
+        
+        # Reject Reason dropdown
+        reject_reason_letter = get_column_letter(reject_reason_idx)
+        dv2 = DataValidation(
+            type="list",
+            formula1=f'"' + ','.join(REJECT_REASONS_REVIEW) + '"',
+            allow_blank=True
+        )
+        worksheet.add_data_validation(dv2)
+        dv2.add(f"{reject_reason_letter}2:{reject_reason_letter}{last_row}")
+        
+        # Add conditional formatting
+        self._add_conditional_formatting_review(
+            worksheet,
+            take_action_idx,
+            reject_reason_idx,
+            additional_info_idx,
+            send_to_idx,
+            last_row
+        )
         
         # Format headers
         self._format_headers(worksheet)
@@ -258,6 +304,39 @@ class ExcelWriter:
             )
             worksheet.conditional_formatting.add(f"{additional_letter}{row}", rule3)
             worksheet.conditional_formatting.add(f"{send_to_letter}{row}", rule3)
+    
+    def _add_conditional_formatting_review(self, worksheet, take_action_col,
+                                          reject_reason_col, additional_info_col,
+                                          send_to_col, last_row):
+        """Add conditional formatting to Review sheet."""
+        
+        # Colors
+        highlight_yellow = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+        highlight_green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+        
+        take_action_letter = get_column_letter(take_action_col)
+        reject_reason_letter = get_column_letter(reject_reason_col)
+        additional_letter = get_column_letter(additional_info_col)
+        send_to_letter = get_column_letter(send_to_col)
+        
+        # Highlight "Reject Reason" when Take Action = "Reject"
+        for row in range(2, last_row + 1):
+            rule1 = FormulaRule(
+                formula=[f'${take_action_letter}{row}="Reject"'],
+                stopIfTrue=False,
+                fill=highlight_yellow
+            )
+            worksheet.conditional_formatting.add(f"{reject_reason_letter}{row}", rule1)
+        
+        # Highlight "Additional Scoring Information" and "Send to" when Take Action = "MQL - Send to Sales"
+        for row in range(2, last_row + 1):
+            rule2 = FormulaRule(
+                formula=[f'${take_action_letter}{row}="MQL - Send to Sales"'],
+                stopIfTrue=False,
+                fill=highlight_green
+            )
+            worksheet.conditional_formatting.add(f"{additional_letter}{row}", rule2)
+            worksheet.conditional_formatting.add(f"{send_to_letter}{row}", rule2)
     
     def _format_headers(self, worksheet):
         """Format header row with bold text and background color."""

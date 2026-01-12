@@ -32,11 +32,12 @@ FIELDS = [
     "Status",
     "Action Taken",
     "Company Domain Validation",
-    "Take Action",                            # NEW
-    "Valid Company → Reject Reason",          # NEW
-    "Invalid Company Reason",                 # NEW
-    "Additional Scoring Information",         # NEW
-    "Send to"                                 # NEW
+    "Take Action",
+    "Valid Company → Reject Reason",
+    "Invalid Company Reason",
+    "Reject Reason",                      # NEW for Review sheet
+    "Additional Scoring Information",
+    "Send to"
 ]
 
 
