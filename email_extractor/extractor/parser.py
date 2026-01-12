@@ -29,8 +29,9 @@ FIELDS = [
     "Potential Distribution Partner (matching in beta testing)", "Digital activity",
     "Eloqua Profiler", "Initial Call Notes",
     "Has Contact Sales Form",
-    "Status",           # NEW
-    "Action Taken"      # NEW
+    "Status",
+    "Action Taken",
+    "Company Domain Validation"  # NEW
 ]
 
 

@@ -112,22 +112,38 @@ def main():
         for i in range(len(rows)):
             status_map[i] = ("Not Started", "Email moving was not requested")
     
-    # Update rows with status information
+    # Update rows with status information (without overriding existing statuses)
     for i, row in enumerate(rows):
-        # Don't override if already marked as University Contact
-        if row.get("Status") == "University Contact":
-            continue
+        # Define protected statuses that should never be overwritten
+        protected_statuses = ["University Contact", "Completed"]
+        current_status = row.get("Status", "")
         
-        if i in status_map:
-            status, action = status_map[i]
-            row["Status"] = status
-            row["Action Taken"] = action
-        else:
-            row["Status"] = "Not Started"
-            row["Action Taken"] = "No action taken"
+        # Only update if not protected
+        if current_status not in protected_statuses:
+            if i in status_map:
+                status, action = status_map[i]
+                row["Status"] = status
+                row["Action Taken"] = action
+            elif not current_status:  # Only set default if completely empty
+                row["Status"] = "Not Started"
+                row["Action Taken"] = "No action taken"
     
     # Create DataFrame
     df = pd.DataFrame(rows)
+    
+    # NEW: Validate company domains for ALL rows
+    print("\nValidating company domains...")
+    from extractor.domain_validator import DomainValidator
+    domain_validator = DomainValidator()
+    
+    validation_results = []
+    for _, row in df.iterrows():
+        company = row.get("Company", "")
+        email = row.get("Email Address", "")
+        result = domain_validator.validate_domain(company, email)
+        validation_results.append(result["status"])
+    
+    df["Company Domain Validation"] = validation_results
     
     # Split by subject type
     df_validation = df[df["Subject"].str.contains("validation", case=False, na=False)].copy()
@@ -136,6 +152,27 @@ def main():
     if df_validation.empty and df_review.empty:
         print("No emails matched 'validation' or 'review' subjects.")
         return
+    
+    # For Review sheet, check Account Type = "Mass Market" (without overriding protected statuses)
+    if not df_review.empty:
+        mass_market_mask = df_review["Account Type"].str.contains("mass market", case=False, na=False)
+        
+        # Only update rows that don't already have a protected status
+        protected_statuses = ["University Contact", "Completed"]
+        
+        mass_market_updated = 0
+        for idx in df_review[mass_market_mask].index:
+            current_status = df_review.at[idx, "Status"]
+            if current_status not in protected_statuses:
+                df_review.at[idx, "Status"] = "Mass Market"
+                df_review.at[idx, "Action Taken"] = "Identified as Mass Market account"
+                mass_market_updated += 1
+        
+        mass_market_count = mass_market_mask.sum()
+        if mass_market_updated > 0:
+            print(f"\n✓ Identified {mass_market_updated} Mass Market accounts in Review sheet")
+            if mass_market_count > mass_market_updated:
+                print(f"  (Note: {mass_market_count - mass_market_updated} Mass Market rows kept existing status)")
     
     # Save to Excel
     output_dir = ensure_output_dir()
@@ -148,7 +185,6 @@ def main():
     print(f"\n✓ Saved to: {filename}")
     print(f"  - Validation sheet: {len(df_validation)} rows")
     print(f"  - Review sheet: {len(df_review)} rows")
-
 
 if __name__ == "__main__":
     try:
