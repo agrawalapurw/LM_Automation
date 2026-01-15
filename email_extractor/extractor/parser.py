@@ -38,7 +38,9 @@ FIELDS = [
     "Reject Reason",
     "Additional Scoring Information",
     "Send to",
-    "Move to Folder"  # NEW
+    "Move to Folder",
+    "Form Submission Status",
+    "Email Move Status"  # NEW
 ]
 
 

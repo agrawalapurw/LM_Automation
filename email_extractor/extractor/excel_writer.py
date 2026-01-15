@@ -84,7 +84,8 @@ VALIDATION_WORKFLOW_COLS = [
     "Send to",
     "Move to Folder",
     "Status",
-    "Action Taken"
+    "Action Taken",
+    "Form Submission Status"  # NEW
 ]
 
 REVIEW_WORKFLOW_COLS = [
@@ -94,7 +95,8 @@ REVIEW_WORKFLOW_COLS = [
     "Send to",
     "Move to Folder",
     "Status",
-    "Action Taken"
+    "Action Taken",
+    "Form Submission Status"  # NEW
 ]
 
 
