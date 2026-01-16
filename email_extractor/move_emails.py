@@ -2,7 +2,8 @@ import os
 import sys
 import pandas as pd
 import win32com.client
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
+from datetime import datetime
 
 
 class SmartEmailMover:
@@ -104,13 +105,14 @@ class SmartEmailMover:
         print("✗ Not found")
         return None
     
-    def find_email_by_subject_and_date(self, folder, subject: str, received_time: str):
+    def find_email_by_subject_and_date(self, folder, subject: str, received_time: str, debug: bool = False):
         """Find an email in a folder by subject and received time.
         
         Args:
             folder: Outlook folder to search in
             subject: Email subject
             received_time: Received time string (format: "YYYY-MM-DD HH:MM:SS")
+            debug: If True, print detailed matching info
             
         Returns:
             Email item or None
@@ -119,13 +121,18 @@ class SmartEmailMover:
             items = folder.Items
             items.Sort("[ReceivedTime]", True)
             
+            total_items = items.Count
+            if debug:
+                print(f"    Searching in folder: {folder.Name} ({total_items} items)")
+            
             # Parse received time - handle multiple formats
-            from datetime import datetime
             target_time = None
             
             for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
                 try:
                     target_time = datetime.strptime(received_time.strip(), fmt)
+                    if debug:
+                        print(f"    Target time parsed: {target_time}")
                     break
                 except:
                     continue
@@ -136,9 +143,12 @@ class SmartEmailMover:
             
             # Normalize subject for comparison
             subject_normalized = subject.strip().lower()
+            if debug:
+                print(f"    Looking for subject: '{subject_normalized[:50]}...'")
             
-            # Search for matching email (increased limit and tolerance)
-            for i in range(1, min(items.Count + 1, 1000)):  # Search up to 1000 recent emails
+            # Search for matching email
+            matches_found = 0
+            for i in range(1, min(items.Count + 1, 1000)):
                 try:
                     item = items.Item(i)
                     
@@ -148,103 +158,61 @@ class SmartEmailMover:
                     item_subject = (getattr(item, "Subject", "") or "").strip().lower()
                     item_received = getattr(item, "ReceivedTime", None)
                     
-                    # Match subject (exact match)
-                    if item_subject != subject_normalized:
-                        continue
+                    # Debug: Show first few emails for comparison
+                    if debug and i <= 5:
+                        print(f"    Email {i}: '{item_subject[:50]}...' | {item_received}")
                     
-                    # Match time (within 5 minute tolerance for clock differences)
-                    if item_received:
-                        try:
-                            time_diff = abs((item_received - target_time).total_seconds())
-                            if time_diff <= 300:  # Within 5 minutes
-                                return item
-                        except:
-                            # If datetime comparison fails, try date-only comparison
-                            if (item_received.year == target_time.year and
-                                item_received.month == target_time.month and
-                                item_received.day == target_time.day):
-                                return item
-                except:
+                    # Check subject match
+                    subject_match = item_subject == subject_normalized
+                    
+                    if subject_match:
+                        matches_found += 1
+                        if debug:
+                            print(f"    → Subject match #{matches_found} at position {i}")
+                            print(f"      Item time: {item_received}")
+                            print(f"      Target time: {target_time}")
+                        
+                        # Match time (within 5 minute tolerance)
+                        if item_received:
+                            try:
+                                time_diff = abs((item_received - target_time).total_seconds())
+                                if debug:
+                                    print(f"      Time difference: {time_diff} seconds")
+                                
+                                if time_diff <= 300:  # Within 5 minutes
+                                    if debug:
+                                        print(f"    ✓ MATCH FOUND!")
+                                    return item
+                            except Exception as e:
+                                if debug:
+                                    print(f"      Time comparison error: {e}")
+                                # Try date-only comparison
+                                try:
+                                    if (item_received.year == target_time.year and
+                                        item_received.month == target_time.month and
+                                        item_received.day == target_time.day):
+                                        if debug:
+                                            print(f"    ✓ MATCH FOUND (date only)!")
+                                        return item
+                                except:
+                                    pass
+                
+                except Exception as e:
+                    if debug and i <= 5:
+                        print(f"    Error reading item {i}: {e}")
                     continue
             
-            # If not found, try just by subject (last resort)
-            print(f"    ⊘ Trying subject-only match...")
-            for i in range(1, min(items.Count + 1, 500)):
-                try:
-                    item = items.Item(i)
-                    if getattr(item, "Class", None) != 43:
-                        continue
-                    
-                    item_subject = (getattr(item, "Subject", "") or "").strip().lower()
-                    if item_subject == subject_normalized:
-                        print(f"    ✓ Found by subject match")
-                        return item
-                except:
-                    continue
+            if debug:
+                print(f"    Total subject matches found: {matches_found}")
+                if matches_found > 0:
+                    print(f"    → But none matched the time criteria")
+                else:
+                    print(f"    → No subject matches found at all")
             
         except Exception as e:
             print(f"    ✗ Error searching for email: {e}")
         
         return None
-    
-    def find_email_in_all_folders(self, subject: str, received_time: str):
-        """Search for email across all folders if not found in source.
-        
-        Args:
-            subject: Email subject
-            received_time: Received time
-            
-        Returns:
-            Tuple of (email_item, folder) or (None, None)
-        """
-        print(f"    Searching in all folders...")
-        
-        try:
-            # Search all stores
-            for i in range(self.namespace.Stores.Count):
-                store = self.namespace.Stores.Item(i + 1)
-                root = store.GetRootFolder()
-                
-                result = self._search_folder_tree(root, subject, received_time)
-                if result:
-                    return result
-        except:
-            pass
-        
-        try:
-            # Also try Folders collection
-            for i in range(self.namespace.Folders.Count):
-                root = self.namespace.Folders.Item(i + 1)
-                
-                result = self._search_folder_tree(root, subject, received_time)
-                if result:
-                    return result
-        except:
-            pass
-        
-        return None, None
-    
-    def _search_folder_tree(self, folder, subject: str, received_time: str, max_depth: int = 5, current_depth: int = 0):
-        """Recursively search folder tree for email."""
-        if current_depth > max_depth:
-            return None, None
-        
-        # Search in current folder
-        email = self.find_email_by_subject_and_date(folder, subject, received_time)
-        if email:
-            print(f"    ✓ Found in: {folder.FolderPath}")
-            return email, folder
-        
-        # Search in subfolders
-        try:
-            for subfolder in folder.Folders:
-                result = self._search_folder_tree(subfolder, subject, received_time, max_depth, current_depth + 1)
-                if result[0]:
-                    return result
-        except:
-            pass
-        
-        return None, None
     
     def move_email(self, email_item, target_folder):
         """Move an email to target folder.
@@ -315,7 +283,7 @@ class SmartEmailMover:
                 self.stats["skipped"] += 1
                 continue
             
-            print(f"Row {row_num}: {subject[:40]}... → {move_to}")
+            print(f"\nRow {row_num}: {subject[:40]}... → {move_to}")
             
             # Find target folder
             target_folder = self.find_folder_in_all_stores(move_to)
@@ -326,21 +294,19 @@ class SmartEmailMover:
                 self.stats["folder_not_found"] += 1
                 continue
             
-            # Find the email in source folder first
-            email_item = self.find_email_by_subject_and_date(source_folder, subject, received_time)
+            # Find the email ONLY in selected source folder
+            email_item = self.find_email_by_subject_and_date(
+                source_folder,
+                subject,
+                received_time,
+                debug=(index < 3)  # Debug first 3 rows only
+            )
             
-            # If not found in source, search everywhere
             if not email_item:
-                print(f"  ⊘ Not in source folder, searching all folders...")
-                email_item, found_folder = self.find_email_in_all_folders(subject, received_time)
-                
-                if email_item:
-                    print(f"    ✓ Found in: {found_folder.Name}")
-                else:
-                    print(f"  ✗ Email not found anywhere")
-                    status_updates[index] = "Failed - Email not found"
-                    self.stats["failed"] += 1
-                    continue
+                print(f"  ✗ Email not found in source folder")
+                status_updates[index] = "Failed - Email not found in source folder"
+                self.stats["failed"] += 1
+                continue
             
             # Move the email
             if self.move_email(email_item, target_folder):
@@ -418,7 +384,7 @@ def select_source_folder(namespace):
     if not stores:
         raise RuntimeError("No Outlook stores found")
     
-    print("Available stores:")
+    print("\nAvailable stores:")
     for i, store in enumerate(stores, 1):
         print(f"  [{i}] {store}")
     
@@ -433,6 +399,7 @@ def select_source_folder(namespace):
         print("Invalid selection.")
     
     # Get root folder
+    root = None
     try:
         for i in range(namespace.Stores.Count):
             store = namespace.Stores.Item(i + 1)
@@ -440,10 +407,20 @@ def select_source_folder(namespace):
                 root = store.GetRootFolder()
                 break
     except:
-        for i in range(namespace.Folders.Count):
-            root = namespace.Folders.Item(i + 1)
-            if root.Name == store_name:
-                break
+        pass
+    
+    if not root:
+        try:
+            for i in range(namespace.Folders.Count):
+                folder = namespace.Folders.Item(i + 1)
+                if folder.Name == store_name:
+                    root = folder
+                    break
+        except:
+            pass
+    
+    if not root:
+        raise RuntimeError(f"Could not access store: {store_name}")
     
     # Navigate to folder
     path = [root]

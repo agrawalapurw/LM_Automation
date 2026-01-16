@@ -11,20 +11,47 @@ DEFAULT_FILTERS = ["Pre-MQL ready for review", "Pre-MQL ready for validation"]
 
 
 def get_date_label(ranges):
-    """Generate filename label from date ranges."""
+    """Generate filename label from date ranges.
+    
+    Examples:
+        Single date: Extraction_13Jan24
+        Range: Extraction_13to16Jan24
+        Cross-month: Extraction_28Janto2Feb24
+    """
     if not ranges:
-        return "selection"
+        return "Extraction_selection"
     
     sorted_ranges = sorted(ranges, key=lambda x: x[0])
     
+    # Single date
     if len(sorted_ranges) == 1:
         start, end = sorted_ranges[0]
         if (end - start) == timedelta(days=1):
-            return start.strftime("%Y_%m_%d")
-        return f"{start.strftime('%Y_%m_%d')}_to_{(end - timedelta(days=1)).strftime('%Y_%m_%d')}"
+            # Format: 13Jan24
+            return f"Extraction_{start.strftime('%d%b%y')}"
+        
+        # Date range (same start and end)
+        end_inclusive = end - timedelta(days=1)
+        
+        # Check if same month
+        if start.month == end_inclusive.month and start.year == end_inclusive.year:
+            # Format: Extraction_13to16Jan24
+            return f"Extraction_{start.strftime('%d')}to{end_inclusive.strftime('%d%b%y')}"
+        else:
+            # Different months: Extraction_28Janto2Feb24
+            return f"Extraction_{start.strftime('%d%b')}to{end_inclusive.strftime('%d%b%y')}"
     
-    dates = [start.strftime("%Y_%m_%d") for start, _ in sorted_ranges]
-    return "+".join(dates)
+    # Multiple non-consecutive dates
+    # Use first and last date
+    first_date = sorted_ranges[0][0]
+    last_date = sorted_ranges[-1][0]
+    
+    if first_date.month == last_date.month and first_date.year == last_date.year:
+        # Same month: Extraction_5to13Jan24
+        return f"Extraction_{first_date.strftime('%d')}to{last_date.strftime('%d%b%y')}"
+    else:
+        # Different months: Extraction_28Decto5Jan24
+        return f"Extraction_{first_date.strftime('%d%b')}to{last_date.strftime('%d%b%y')}"
 
 
 def ensure_output_dir():

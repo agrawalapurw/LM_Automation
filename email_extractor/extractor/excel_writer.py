@@ -3,11 +3,61 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, Color
+from openpyxl.styles.colors import BLUE
 from openpyxl.formatting.rule import FormulaRule
 
 
-# Dropdown options for Validation sheet
+# Color scheme for column headers
+FILTER_COLUMNS_COLOR = "FFC7CE"      # Light Red - For filtering
+USER_INPUT_COLOR = "FFEB9C"          # Light Orange - For manual input
+STATUS_TRACKING_COLOR = "C6EFCE"     # Light Green - For tracking results
+
+# Column groups for Validation sheet
+VALIDATION_FILTER_COLUMNS = [
+    "Has Contact Sales Form",
+    "Company Domain Validation",
+    "Status"
+]
+
+VALIDATION_INPUT_COLUMNS = [
+    "Take Action",
+    "Valid Company → Reject Reason",
+    "Invalid Company Reason",
+    "Additional Scoring Information",
+    "Send to",
+    "Move to Folder"
+]
+
+VALIDATION_STATUS_COLUMNS = [
+    "Action Taken",
+    "Form Submission Status",
+    "Email Move Status"
+]
+
+# Column groups for Review sheet
+REVIEW_FILTER_COLUMNS = [
+    "Has Contact Sales Form",
+    "Company Domain Validation",
+    "Status"
+]
+
+REVIEW_INPUT_COLUMNS = [
+    "Take Action",
+    "Reject Reason",
+    "Additional Scoring Information",
+    "Send to",
+    "Move to Folder"
+]
+
+REVIEW_STATUS_COLUMNS = [
+    "Action Taken",
+    "Form Submission Status",
+    "Email Move Status"
+]
+
+
+# Rest of the dropdown options remain the same...
 TAKE_ACTION_VALIDATION = [
     "Valid Company → MQL",
     "Valid Company → Reject",
@@ -35,7 +85,6 @@ INVALID_COMPANY_REASONS = [
     "Competitor"
 ]
 
-# Dropdown options for Review sheet
 TAKE_ACTION_REVIEW = [
     "MQL - Send to Sales",
     "Reject"
@@ -53,7 +102,6 @@ REJECT_REASONS_REVIEW = [
     "Distribution Partner"
 ]
 
-# Move to Folder options (common for both sheets)
 MOVE_TO_FOLDER_OPTIONS = [
     "Arrow",
     "EBV/Avnet",
@@ -63,6 +111,17 @@ MOVE_TO_FOLDER_OPTIONS = [
     "Rutronik",
     "Rejected Marketing"
 ]
+
+FOLDER_COLORS = {
+    "Arrow": "FFE699",
+    "EBV/Avnet": "B4C7E7",
+    "Future": "C5E0B4",
+    "Non-EBV Leads": "F4B084",
+    "Other Distribution Partners": "D9D2E9",
+    "Rutronik": "FFF2CC",
+    "Rejected Marketing": "F8CBAD"
+}
+
 
 # Color scheme for Move to Folder options
 FOLDER_COLORS = {
@@ -76,6 +135,7 @@ FOLDER_COLORS = {
 }
 
 # Workflow columns for each sheet
+"""
 VALIDATION_WORKFLOW_COLS = [
     "Take Action",
     "Valid Company → Reject Reason",
@@ -98,7 +158,19 @@ REVIEW_WORKFLOW_COLS = [
     "Action Taken",
     "Form Submission Status"  # NEW
 ]
+"""
+# Workflow columns for each sheet (UPDATED ORDER - grouped by color)
+VALIDATION_WORKFLOW_COLS = (
+    VALIDATION_FILTER_COLUMNS +      # Light Red
+    VALIDATION_INPUT_COLUMNS +       # Light Orange
+    VALIDATION_STATUS_COLUMNS        # Light Green
+)
 
+REVIEW_WORKFLOW_COLS = (
+    REVIEW_FILTER_COLUMNS +          # Light Red
+    REVIEW_INPUT_COLUMNS +           # Light Orange
+    REVIEW_STATUS_COLUMNS            # Light Green
+)
 
 class ExcelWriter:
     """Write two DataFrames to Excel with separate sheets and dropdowns."""
@@ -127,7 +199,8 @@ class ExcelWriter:
         """Write Validation sheet with special columns and dropdowns."""
         
         # Add validation-specific workflow columns if they don't exist
-        for col in VALIDATION_WORKFLOW_COLS:
+        all_workflow = VALIDATION_FILTER_COLUMNS + VALIDATION_INPUT_COLUMNS + VALIDATION_STATUS_COLUMNS
+        for col in all_workflow:
             if col not in df.columns:
                 df[col] = ""
         
@@ -135,9 +208,12 @@ class ExcelWriter:
         if "Reject Reason" in df.columns:
             df = df.drop(columns=["Reject Reason"])
         
-        # Reorder columns: data columns first, then workflow columns at the end
-        data_columns = [col for col in df.columns if col not in VALIDATION_WORKFLOW_COLS]
-        ordered_columns = data_columns + VALIDATION_WORKFLOW_COLS
+        # Reorder columns: data columns first, then workflow columns grouped by color
+        data_columns = [col for col in df.columns if col not in all_workflow]
+        ordered_columns = (data_columns + 
+                          VALIDATION_FILTER_COLUMNS + 
+                          VALIDATION_INPUT_COLUMNS + 
+                          VALIDATION_STATUS_COLUMNS)
         df = df[ordered_columns]
         
         # Write headers
@@ -147,6 +223,9 @@ class ExcelWriter:
         # Write data rows
         for _, row in df.iterrows():
             worksheet.append([row[col] for col in headers])
+        
+        # Color the headers
+        self._color_headers(worksheet, headers, "Validation")
         
         # Get column indices for workflow columns
         take_action_idx = headers.index("Take Action") + 1
@@ -216,8 +295,10 @@ class ExcelWriter:
         # Add row coloring based on Move to Folder
         self._add_row_coloring(worksheet, move_to_folder_idx, last_row, total_cols)
         
-        # Format headers
-        self._format_headers(worksheet)
+        # Make links clickable
+        self._make_links_clickable(worksheet, "PreMQL review/validation link")
+        self._make_links_clickable(worksheet, "Eloqua Profiler")
+        self._make_links_clickable(worksheet, "URL Of Form")
         
         # Freeze header row
         worksheet.freeze_panes = "A2"
@@ -229,7 +310,8 @@ class ExcelWriter:
         """Write Review sheet with Take Action and Reject Reason dropdowns."""
         
         # Add review-specific workflow columns if they don't exist
-        for col in REVIEW_WORKFLOW_COLS:
+        all_workflow = REVIEW_FILTER_COLUMNS + REVIEW_INPUT_COLUMNS + REVIEW_STATUS_COLUMNS
+        for col in all_workflow:
             if col not in df.columns:
                 df[col] = ""
         
@@ -240,9 +322,12 @@ class ExcelWriter:
         ]
         df = df.drop(columns=[col for col in validation_specific if col in df.columns])
         
-        # Reorder columns: data columns first, then workflow columns at the end
-        data_columns = [col for col in df.columns if col not in REVIEW_WORKFLOW_COLS]
-        ordered_columns = data_columns + REVIEW_WORKFLOW_COLS
+        # Reorder columns: data columns first, then workflow columns grouped by color
+        data_columns = [col for col in df.columns if col not in all_workflow]
+        ordered_columns = (data_columns + 
+                          REVIEW_FILTER_COLUMNS + 
+                          REVIEW_INPUT_COLUMNS + 
+                          REVIEW_STATUS_COLUMNS)
         df = df[ordered_columns]
         
         # Write headers
@@ -252,6 +337,9 @@ class ExcelWriter:
         # Write data rows
         for _, row in df.iterrows():
             worksheet.append([row[col] for col in headers])
+        
+        # Color the headers
+        self._color_headers(worksheet, headers, "Review")
         
         # Get column indices for workflow columns
         take_action_idx = headers.index("Take Action") + 1
@@ -309,8 +397,10 @@ class ExcelWriter:
         # Add row coloring based on Move to Folder
         self._add_row_coloring(worksheet, move_to_folder_idx, last_row, total_cols)
         
-        # Format headers
-        self._format_headers(worksheet)
+        # Make links clickable
+        self._make_links_clickable(worksheet, "PreMQL review/validation link")
+        self._make_links_clickable(worksheet, "Eloqua Profiler")
+        self._make_links_clickable(worksheet, "URL Of Form")
         
         # Freeze header row
         worksheet.freeze_panes = "A2"
@@ -347,6 +437,96 @@ class ExcelWriter:
                 range_to_format = f"{first_col}{row}:{last_col}{row}"
                 
                 worksheet.conditional_formatting.add(range_to_format, rule)
+
+    def _color_headers(self, worksheet, headers: list, sheet_type: str):
+        """Color-code headers based on column groups.
+        
+        Args:
+            worksheet: The worksheet
+            headers: List of column names
+            sheet_type: "Validation" or "Review"
+        """
+        # Select appropriate column groups
+        if sheet_type == "Validation":
+            filter_cols = VALIDATION_FILTER_COLUMNS
+            input_cols = VALIDATION_INPUT_COLUMNS
+            status_cols = VALIDATION_STATUS_COLUMNS
+        else:
+            filter_cols = REVIEW_FILTER_COLUMNS
+            input_cols = REVIEW_INPUT_COLUMNS
+            status_cols = REVIEW_STATUS_COLUMNS
+        
+        # Define fills
+        filter_fill = PatternFill(start_color=FILTER_COLUMNS_COLOR, end_color=FILTER_COLUMNS_COLOR, fill_type="solid")
+        input_fill = PatternFill(start_color=USER_INPUT_COLOR, end_color=USER_INPUT_COLOR, fill_type="solid")
+        status_fill = PatternFill(start_color=STATUS_TRACKING_COLOR, end_color=STATUS_TRACKING_COLOR, fill_type="solid")
+        default_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
+        
+        header_font_white = Font(bold=True, color="FFFFFF")
+        header_font_black = Font(bold=True, color="000000")
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        
+        # Color each header
+        for col_idx, col_name in enumerate(headers, start=1):
+            cell = worksheet.cell(row=1, column=col_idx)
+            cell.alignment = header_alignment
+            
+            if col_name in filter_cols:
+                # Light Red - Filter columns
+                cell.fill = filter_fill
+                cell.font = header_font_black
+            elif col_name in input_cols:
+                # Light Orange - Input columns
+                cell.fill = input_fill
+                cell.font = header_font_black
+            elif col_name in status_cols:
+                # Light Green - Status columns
+                cell.fill = status_fill
+                cell.font = header_font_black
+            else:
+                # Default Blue - Data columns
+                cell.fill = default_fill
+                cell.font = header_font_white
+        
+        # Set header row height
+        worksheet.row_dimensions[1].height = 35
+    
+    def _make_links_clickable(self, worksheet, column_name: str):
+        """Make URLs in a specific column clickable.
+        
+        Args:
+            worksheet: The worksheet to update
+            column_name: Name of the column containing URLs
+        """
+        # Find the column index
+        header_row = 1
+        link_col = None
+        
+        for col in range(1, worksheet.max_column + 1):
+            cell_value = worksheet.cell(row=header_row, column=col).value
+            if cell_value == column_name:
+                link_col = col
+                break
+        
+        if link_col is None:
+            return
+        
+        link_col_letter = get_column_letter(link_col)
+        
+        # Style for hyperlinks
+        link_font = Font(color="0000FF", underline="single")  # Blue color as hex
+        
+        # Make each URL clickable
+        for row in range(2, worksheet.max_row + 1):
+            cell = worksheet.cell(row=row, column=link_col)
+            url = cell.value
+            
+            if url and isinstance(url, str) and url.startswith("http"):
+                # Set hyperlink
+                cell.hyperlink = url
+                cell.value = url
+                cell.font = link_font
+                cell.style = "Hyperlink"
     
     def _add_conditional_formatting_validation(self, worksheet, take_action_col, 
                                                valid_reject_col, invalid_col, 
@@ -424,8 +604,8 @@ class ExcelWriter:
             worksheet.conditional_formatting.add(f"{additional_letter}{row}", rule2)
             worksheet.conditional_formatting.add(f"{send_to_letter}{row}", rule2)
     
+    """
     def _format_headers(self, worksheet):
-        """Format header row with bold text and background color."""
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF")
         header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -437,6 +617,7 @@ class ExcelWriter:
         
         # Set header row height
         worksheet.row_dimensions[1].height = 30
+        """
     
     def _adjust_column_widths(self, worksheet):
         """Auto-adjust column widths based on content."""
@@ -453,3 +634,41 @@ class ExcelWriter:
             
             adjusted_width = min(max_length + 3, 50)
             worksheet.column_dimensions[column_letter].width = adjusted_width
+
+
+    def _make_links_clickable(self, worksheet, column_name: str):
+        """Make URLs in a specific column clickable.
+        
+        Args:
+            worksheet: The worksheet to update
+            column_name: Name of the column containing URLs
+        """
+        # Find the column index
+        header_row = 1
+        link_col = None
+        
+        for col in range(1, worksheet.max_column + 1):
+            cell_value = worksheet.cell(row=header_row, column=col).value
+            if cell_value == column_name:
+                link_col = col
+                break
+        
+        if link_col is None:
+            return
+        
+        link_col_letter = get_column_letter(link_col)
+        
+        # Style for hyperlinks
+        link_font = Font(color="0000FF", underline="single")
+        
+        # Make each URL clickable
+        for row in range(2, worksheet.max_row + 1):
+            cell = worksheet.cell(row=row, column=link_col)
+            url = cell.value
+            
+            if url and isinstance(url, str) and url.startswith("http"):
+                # Set hyperlink
+                cell.hyperlink = url
+                cell.value = url
+                cell.font = link_font
+                cell.style = "Hyperlink"
