@@ -1,7 +1,11 @@
+"""
+Automate Forms
+CLI script to run web form automation.
+"""
+
 import os
 import sys
 from extractor.web_automation import WebFormAutomation
-
 
 def main():
     print("=" * 60)
@@ -63,6 +67,13 @@ def main():
     headless_input = input("\nRun in headless mode (no browser UI)? [y/N]: ").strip().lower()
     headless = headless_input in ("y", "yes")
     
+    # Keep browser open option (for debugging)
+    if not headless:
+        keep_open_input = input("Keep browser open after completion (for debugging)? [y/N]: ").strip().lower()
+        keep_open = keep_open_input in ("y", "yes")
+    else:
+        keep_open = False
+    
     # Confirmation
     print("\n" + "=" * 60)
     print("READY TO START")
@@ -83,7 +94,7 @@ def main():
         return
     
     # Start automation
-    automation = WebFormAutomation(headless=headless)
+    automation = WebFormAutomation(headless=headless, keep_open=keep_open)
     
     try:
         automation.start_browser()
@@ -104,7 +115,6 @@ def main():
         automation.stop_browser()
     
     print("\n✓ Automation completed!")
-
 
 if __name__ == "__main__":
     main()

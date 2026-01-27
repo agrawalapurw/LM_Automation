@@ -1,22 +1,25 @@
+"""
+Excel Writer
+Writes DataFrames to Excel with formatting and dropdowns.
+"""
+
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, Font, Alignment, Color
-from openpyxl.styles.colors import BLUE
+from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.formatting.rule import FormulaRule
 
-
-# Color scheme for column headers
-FILTER_COLUMNS_COLOR = "FFC7CE"      # Light Red - For filtering
-USER_INPUT_COLOR = "FFEB9C"          # Light Orange - For manual input
-STATUS_TRACKING_COLOR = "C6EFCE"     # Light Green - For tracking results
+# Color scheme
+FILTER_COLUMNS_COLOR = "FFC7CE"      # Light Red
+USER_INPUT_COLOR = "FFEB9C"          # Light Orange
+STATUS_TRACKING_COLOR = "C6EFCE"     # Light Green
 
 # Column groups for Validation sheet
 VALIDATION_FILTER_COLUMNS = [
     "Has Contact Sales Form",
     "Company Domain Validation",
+    "Validation Status",
     "Status"
 ]
 
@@ -39,6 +42,7 @@ VALIDATION_STATUS_COLUMNS = [
 REVIEW_FILTER_COLUMNS = [
     "Has Contact Sales Form",
     "Company Domain Validation",
+    "Validation Status",
     "Status"
 ]
 
@@ -56,8 +60,7 @@ REVIEW_STATUS_COLUMNS = [
     "Email Move Status"
 ]
 
-
-# Rest of the dropdown options remain the same...
+# Dropdown options
 TAKE_ACTION_VALIDATION = [
     "Valid Company → MQL",
     "Valid Company → Reject",
@@ -122,73 +125,20 @@ FOLDER_COLORS = {
     "Rejected Marketing": "F8CBAD"
 }
 
-
-# Color scheme for Move to Folder options
-FOLDER_COLORS = {
-    "Arrow": "FFE699",              # Light Orange
-    "EBV/Avnet": "B4C7E7",          # Light Blue
-    "Future": "C5E0B4",             # Light Green
-    "Non-EBV Leads": "F4B084",      # Peach
-    "Other Distribution Partners": "D9D2E9",  # Light Purple
-    "Rutronik": "FFF2CC",           # Light Yellow
-    "Rejected Marketing": "F8CBAD"  # Light Salmon
-}
-
-# Workflow columns for each sheet
-"""
-VALIDATION_WORKFLOW_COLS = [
-    "Take Action",
-    "Valid Company → Reject Reason",
-    "Invalid Company Reason",
-    "Additional Scoring Information",
-    "Send to",
-    "Move to Folder",
-    "Status",
-    "Action Taken",
-    "Form Submission Status"  # NEW
-]
-
-REVIEW_WORKFLOW_COLS = [
-    "Take Action",
-    "Reject Reason",
-    "Additional Scoring Information",
-    "Send to",
-    "Move to Folder",
-    "Status",
-    "Action Taken",
-    "Form Submission Status"  # NEW
-]
-"""
-# Workflow columns for each sheet (UPDATED ORDER - grouped by color)
-VALIDATION_WORKFLOW_COLS = (
-    VALIDATION_FILTER_COLUMNS +      # Light Red
-    VALIDATION_INPUT_COLUMNS +       # Light Orange
-    VALIDATION_STATUS_COLUMNS        # Light Green
-)
-
-REVIEW_WORKFLOW_COLS = (
-    REVIEW_FILTER_COLUMNS +          # Light Red
-    REVIEW_INPUT_COLUMNS +           # Light Orange
-    REVIEW_STATUS_COLUMNS            # Light Green
-)
-
 class ExcelWriter:
-    """Write two DataFrames to Excel with separate sheets and dropdowns."""
+    """Write DataFrames to Excel with separate sheets and dropdowns."""
     
     def write_workbook(self, df_validation: pd.DataFrame, df_review: pd.DataFrame, filepath: str):
         """Write two DataFrames to Excel with separate sheets."""
         wb = Workbook()
         
-        # Remove default sheet
         if "Sheet" in wb.sheetnames:
             wb.remove(wb["Sheet"])
         
-        # Write Validation sheet
         if not df_validation.empty:
             ws_val = wb.create_sheet("Validation")
             self._write_validation_sheet(ws_val, df_validation)
         
-        # Write Review sheet
         if not df_review.empty:
             ws_rev = wb.create_sheet("Review")
             self._write_review_sheet(ws_rev, df_review)
@@ -196,19 +146,16 @@ class ExcelWriter:
         wb.save(filepath)
     
     def _write_validation_sheet(self, worksheet, df: pd.DataFrame):
-        """Write Validation sheet with special columns and dropdowns."""
-        
-        # Add validation-specific workflow columns if they don't exist
+        """Write Validation sheet with dropdowns."""
         all_workflow = VALIDATION_FILTER_COLUMNS + VALIDATION_INPUT_COLUMNS + VALIDATION_STATUS_COLUMNS
+        
         for col in all_workflow:
             if col not in df.columns:
                 df[col] = ""
         
-        # Remove review-specific columns if they exist
         if "Reject Reason" in df.columns:
             df = df.drop(columns=["Reject Reason"])
         
-        # Reorder columns: data columns first, then workflow columns grouped by color
         data_columns = [col for col in df.columns if col not in all_workflow]
         ordered_columns = (data_columns + 
                           VALIDATION_FILTER_COLUMNS + 
@@ -216,83 +163,32 @@ class ExcelWriter:
                           VALIDATION_STATUS_COLUMNS)
         df = df[ordered_columns]
         
-        # Write headers
         headers = list(df.columns)
         worksheet.append(headers)
         
-        # Write data rows
         for _, row in df.iterrows():
             worksheet.append([row[col] for col in headers])
         
-        # Color the headers
         self._color_headers(worksheet, headers, "Validation")
         
-        # Get column indices for workflow columns
         take_action_idx = headers.index("Take Action") + 1
         valid_reject_idx = headers.index("Valid Company → Reject Reason") + 1
         invalid_idx = headers.index("Invalid Company Reason") + 1
-        additional_info_idx = headers.index("Additional Scoring Information") + 1
-        send_to_idx = headers.index("Send to") + 1
         move_to_folder_idx = headers.index("Move to Folder") + 1
         
         last_row = worksheet.max_row
         total_cols = len(headers)
         
         # Add dropdowns
-        print(f"Adding dropdowns to Validation sheet (rows 2-{last_row})...")
+        self._add_dropdown(worksheet, take_action_idx, last_row, TAKE_ACTION_VALIDATION)
+        self._add_dropdown(worksheet, valid_reject_idx, last_row, VALID_REJECT_REASONS_VALIDATION)
+        self._add_dropdown(worksheet, invalid_idx, last_row, INVALID_COMPANY_REASONS)
+        self._add_dropdown(worksheet, move_to_folder_idx, last_row, MOVE_TO_FOLDER_OPTIONS)
         
-        # Take Action dropdown
-        take_action_letter = get_column_letter(take_action_idx)
-        dv1 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(TAKE_ACTION_VALIDATION) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv1)
-        dv1.add(f"{take_action_letter}2:{take_action_letter}{last_row}")
+        # Add conditional formatting
+        self._add_conditional_formatting_validation(worksheet, headers, last_row)
         
-        # Valid Company → Reject Reason dropdown
-        valid_reject_letter = get_column_letter(valid_reject_idx)
-        dv2 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(VALID_REJECT_REASONS_VALIDATION) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv2)
-        dv2.add(f"{valid_reject_letter}2:{valid_reject_letter}{last_row}")
-        
-        # Invalid Company Reason dropdown
-        invalid_letter = get_column_letter(invalid_idx)
-        dv3 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(INVALID_COMPANY_REASONS) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv3)
-        dv3.add(f"{invalid_letter}2:{invalid_letter}{last_row}")
-        
-        # Move to Folder dropdown
-        move_to_folder_letter = get_column_letter(move_to_folder_idx)
-        dv4 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(MOVE_TO_FOLDER_OPTIONS) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv4)
-        dv4.add(f"{move_to_folder_letter}2:{move_to_folder_letter}{last_row}")
-        
-        # Add conditional formatting for specific columns
-        self._add_conditional_formatting_validation(
-            worksheet,
-            take_action_idx,
-            valid_reject_idx,
-            invalid_idx,
-            additional_info_idx,
-            send_to_idx,
-            last_row
-        )
-        
-        # Add row coloring based on Move to Folder
+        # Add row coloring
         self._add_row_coloring(worksheet, move_to_folder_idx, last_row, total_cols)
         
         # Make links clickable
@@ -300,29 +196,23 @@ class ExcelWriter:
         self._make_links_clickable(worksheet, "Eloqua Profiler")
         self._make_links_clickable(worksheet, "URL Of Form")
         
-        # Freeze header row
         worksheet.freeze_panes = "A2"
-        
-        # Auto-adjust column widths
         self._adjust_column_widths(worksheet)
     
     def _write_review_sheet(self, worksheet, df: pd.DataFrame):
-        """Write Review sheet with Take Action and Reject Reason dropdowns."""
-        
-        # Add review-specific workflow columns if they don't exist
+        """Write Review sheet with dropdowns."""
         all_workflow = REVIEW_FILTER_COLUMNS + REVIEW_INPUT_COLUMNS + REVIEW_STATUS_COLUMNS
+        
         for col in all_workflow:
             if col not in df.columns:
                 df[col] = ""
         
-        # Remove validation-specific columns if they exist
         validation_specific = [
             "Valid Company → Reject Reason",
             "Invalid Company Reason"
         ]
         df = df.drop(columns=[col for col in validation_specific if col in df.columns])
         
-        # Reorder columns: data columns first, then workflow columns grouped by color
         data_columns = [col for col in df.columns if col not in all_workflow]
         ordered_columns = (data_columns + 
                           REVIEW_FILTER_COLUMNS + 
@@ -330,71 +220,30 @@ class ExcelWriter:
                           REVIEW_STATUS_COLUMNS)
         df = df[ordered_columns]
         
-        # Write headers
         headers = list(df.columns)
         worksheet.append(headers)
         
-        # Write data rows
         for _, row in df.iterrows():
             worksheet.append([row[col] for col in headers])
         
-        # Color the headers
         self._color_headers(worksheet, headers, "Review")
         
-        # Get column indices for workflow columns
         take_action_idx = headers.index("Take Action") + 1
         reject_reason_idx = headers.index("Reject Reason") + 1
-        additional_info_idx = headers.index("Additional Scoring Information") + 1
-        send_to_idx = headers.index("Send to") + 1
         move_to_folder_idx = headers.index("Move to Folder") + 1
         
         last_row = worksheet.max_row
         total_cols = len(headers)
         
         # Add dropdowns
-        print(f"Adding dropdowns to Review sheet (rows 2-{last_row})...")
+        self._add_dropdown(worksheet, take_action_idx, last_row, TAKE_ACTION_REVIEW)
+        self._add_dropdown(worksheet, reject_reason_idx, last_row, REJECT_REASONS_REVIEW)
+        self._add_dropdown(worksheet, move_to_folder_idx, last_row, MOVE_TO_FOLDER_OPTIONS)
         
-        # Take Action dropdown
-        take_action_letter = get_column_letter(take_action_idx)
-        dv1 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(TAKE_ACTION_REVIEW) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv1)
-        dv1.add(f"{take_action_letter}2:{take_action_letter}{last_row}")
+        # Add conditional formatting
+        self._add_conditional_formatting_review(worksheet, headers, last_row)
         
-        # Reject Reason dropdown
-        reject_reason_letter = get_column_letter(reject_reason_idx)
-        dv2 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(REJECT_REASONS_REVIEW) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv2)
-        dv2.add(f"{reject_reason_letter}2:{reject_reason_letter}{last_row}")
-        
-        # Move to Folder dropdown
-        move_to_folder_letter = get_column_letter(move_to_folder_idx)
-        dv3 = DataValidation(
-            type="list",
-            formula1=f'"' + ','.join(MOVE_TO_FOLDER_OPTIONS) + '"',
-            allow_blank=True
-        )
-        worksheet.add_data_validation(dv3)
-        dv3.add(f"{move_to_folder_letter}2:{move_to_folder_letter}{last_row}")
-        
-        # Add conditional formatting for specific columns
-        self._add_conditional_formatting_review(
-            worksheet,
-            take_action_idx,
-            reject_reason_idx,
-            additional_info_idx,
-            send_to_idx,
-            last_row
-        )
-        
-        # Add row coloring based on Move to Folder
+        # Add row coloring
         self._add_row_coloring(worksheet, move_to_folder_idx, last_row, total_cols)
         
         # Make links clickable
@@ -402,51 +251,38 @@ class ExcelWriter:
         self._make_links_clickable(worksheet, "Eloqua Profiler")
         self._make_links_clickable(worksheet, "URL Of Form")
         
-        # Freeze header row
         worksheet.freeze_panes = "A2"
-        
-        # Auto-adjust column widths
         self._adjust_column_widths(worksheet)
     
-    def _add_row_coloring(self, worksheet, move_to_folder_col, last_row, total_cols):
-        """Add conditional formatting to color entire row based on Move to Folder selection."""
-        
+    def _add_dropdown(self, worksheet, col_idx: int, last_row: int, options: list):
+        """Add dropdown validation to a column."""
+        col_letter = get_column_letter(col_idx)
+        dv = DataValidation(
+            type="list",
+            formula1=f'"' + ','.join(options) + '"',
+            allow_blank=True
+        )
+        worksheet.add_data_validation(dv)
+        dv.add(f"{col_letter}2:{col_letter}{last_row}")
+    
+    def _add_row_coloring(self, worksheet, move_to_folder_col: int, last_row: int, total_cols: int):
+        """Add conditional formatting to color rows based on Move to Folder."""
         move_to_folder_letter = get_column_letter(move_to_folder_col)
         
-        print(f"Adding row coloring based on Move to Folder column...")
-        
-        # For each folder option, create a rule that colors the entire row
         for folder, color in FOLDER_COLORS.items():
             fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
             
-            # Apply to entire row (all columns)
-            for row in range(2, last_row + 1):
-                # Formula checks if Move to Folder column equals this folder name
-                formula = f'${move_to_folder_letter}{row}="{folder}"'
-                
-                # Create rule for this row
-                rule = FormulaRule(
-                    formula=[formula],
-                    stopIfTrue=False,
-                    fill=fill
-                )
-                
-                # Apply to all columns in this row
-                first_col = get_column_letter(1)
-                last_col = get_column_letter(total_cols)
-                range_to_format = f"{first_col}{row}:{last_col}{row}"
-                
-                worksheet.conditional_formatting.add(range_to_format, rule)
-
+            first_col = get_column_letter(1)
+            last_col = get_column_letter(total_cols)
+            range_to_format = f"{first_col}2:{last_col}{last_row}"
+            
+            formula = f'${move_to_folder_letter}2="{folder}"'
+            rule = FormulaRule(formula=[formula], stopIfTrue=False, fill=fill)
+            
+            worksheet.conditional_formatting.add(range_to_format, rule)
+    
     def _color_headers(self, worksheet, headers: list, sheet_type: str):
-        """Color-code headers based on column groups.
-        
-        Args:
-            worksheet: The worksheet
-            headers: List of column names
-            sheet_type: "Validation" or "Review"
-        """
-        # Select appropriate column groups
+        """Color-code headers based on column groups."""
         if sheet_type == "Validation":
             filter_cols = VALIDATION_FILTER_COLUMNS
             input_cols = VALIDATION_INPUT_COLUMNS
@@ -456,54 +292,40 @@ class ExcelWriter:
             input_cols = REVIEW_INPUT_COLUMNS
             status_cols = REVIEW_STATUS_COLUMNS
         
-        # Define fills
         filter_fill = PatternFill(start_color=FILTER_COLUMNS_COLOR, end_color=FILTER_COLUMNS_COLOR, fill_type="solid")
         input_fill = PatternFill(start_color=USER_INPUT_COLOR, end_color=USER_INPUT_COLOR, fill_type="solid")
         status_fill = PatternFill(start_color=STATUS_TRACKING_COLOR, end_color=STATUS_TRACKING_COLOR, fill_type="solid")
-        default_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # Blue
+        default_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         
         header_font_white = Font(bold=True, color="FFFFFF")
         header_font_black = Font(bold=True, color="000000")
         header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         
-        # Color each header
         for col_idx, col_name in enumerate(headers, start=1):
             cell = worksheet.cell(row=1, column=col_idx)
             cell.alignment = header_alignment
             
             if col_name in filter_cols:
-                # Light Red - Filter columns
                 cell.fill = filter_fill
                 cell.font = header_font_black
             elif col_name in input_cols:
-                # Light Orange - Input columns
                 cell.fill = input_fill
                 cell.font = header_font_black
             elif col_name in status_cols:
-                # Light Green - Status columns
                 cell.fill = status_fill
                 cell.font = header_font_black
             else:
-                # Default Blue - Data columns
                 cell.fill = default_fill
                 cell.font = header_font_white
         
-        # Set header row height
         worksheet.row_dimensions[1].height = 35
     
     def _make_links_clickable(self, worksheet, column_name: str):
-        """Make URLs in a specific column clickable.
-        
-        Args:
-            worksheet: The worksheet to update
-            column_name: Name of the column containing URLs
-        """
-        # Find the column index
-        header_row = 1
+        """Make URLs in a specific column clickable."""
         link_col = None
         
         for col in range(1, worksheet.max_column + 1):
-            cell_value = worksheet.cell(row=header_row, column=col).value
+            cell_value = worksheet.cell(row=1, column=col).value
             if cell_value == column_name:
                 link_col = col
                 break
@@ -511,58 +333,53 @@ class ExcelWriter:
         if link_col is None:
             return
         
-        link_col_letter = get_column_letter(link_col)
+        link_font = Font(color="0000FF", underline="single")
         
-        # Style for hyperlinks
-        link_font = Font(color="0000FF", underline="single")  # Blue color as hex
-        
-        # Make each URL clickable
         for row in range(2, worksheet.max_row + 1):
             cell = worksheet.cell(row=row, column=link_col)
             url = cell.value
             
             if url and isinstance(url, str) and url.startswith("http"):
-                # Set hyperlink
                 cell.hyperlink = url
                 cell.value = url
                 cell.font = link_font
                 cell.style = "Hyperlink"
     
-    def _add_conditional_formatting_validation(self, worksheet, take_action_col, 
-                                               valid_reject_col, invalid_col, 
-                                               additional_info_col, send_to_col, last_row):
-        """Add conditional formatting to Validation sheet for specific columns."""
-        
-        # Colors for column-specific highlighting (lighter shades to work with row colors)
+    def _add_conditional_formatting_validation(self, worksheet, headers: list, last_row: int):
+        """Add conditional formatting for Validation sheet."""
         highlight_yellow = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
         highlight_green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
         
-        take_action_letter = get_column_letter(take_action_col)
-        valid_reject_letter = get_column_letter(valid_reject_col)
-        invalid_letter = get_column_letter(invalid_col)
-        additional_letter = get_column_letter(additional_info_col)
-        send_to_letter = get_column_letter(send_to_col)
+        take_action_idx = headers.index("Take Action") + 1
+        valid_reject_idx = headers.index("Valid Company → Reject Reason") + 1
+        invalid_idx = headers.index("Invalid Company Reason") + 1
+        additional_idx = headers.index("Additional Scoring Information") + 1
+        send_to_idx = headers.index("Send to") + 1
         
-        # Highlight "Valid Company → Reject Reason" when Take Action = "Valid Company → Reject"
+        take_action_letter = get_column_letter(take_action_idx)
+        valid_reject_letter = get_column_letter(valid_reject_idx)
+        invalid_letter = get_column_letter(invalid_idx)
+        additional_letter = get_column_letter(additional_idx)
+        send_to_letter = get_column_letter(send_to_idx)
+        
         for row in range(2, last_row + 1):
+            # Highlight Valid Company → Reject Reason
             rule1 = FormulaRule(
                 formula=[f'${take_action_letter}{row}="Valid Company → Reject"'],
                 stopIfTrue=False,
                 fill=highlight_yellow
             )
             worksheet.conditional_formatting.add(f"{valid_reject_letter}{row}", rule1)
-        
-        # Highlight "Invalid Company Reason" when Take Action = "Invalid Company"
-        for row in range(2, last_row + 1):
+            
+            # Highlight Invalid Company Reason
             rule2 = FormulaRule(
                 formula=[f'${take_action_letter}{row}="Invalid Company"'],
                 stopIfTrue=False,
                 fill=highlight_yellow
             )
             worksheet.conditional_formatting.add(f"{invalid_letter}{row}", rule2)
-        
-        # Highlight "Additional Scoring Information" and "Send to" when Take Action = "Valid Company → MQL"
-        for row in range(2, last_row + 1):
+            
+            # Highlight Additional Scoring Info and Send to
             rule3 = FormulaRule(
                 formula=[f'${take_action_letter}{row}="Valid Company → MQL"'],
                 stopIfTrue=False,
@@ -571,31 +388,31 @@ class ExcelWriter:
             worksheet.conditional_formatting.add(f"{additional_letter}{row}", rule3)
             worksheet.conditional_formatting.add(f"{send_to_letter}{row}", rule3)
     
-    def _add_conditional_formatting_review(self, worksheet, take_action_col,
-                                          reject_reason_col, additional_info_col,
-                                          send_to_col, last_row):
-        """Add conditional formatting to Review sheet for specific columns."""
-        
-        # Colors for column-specific highlighting
+    def _add_conditional_formatting_review(self, worksheet, headers: list, last_row: int):
+        """Add conditional formatting for Review sheet."""
         highlight_yellow = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
         highlight_green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
         
-        take_action_letter = get_column_letter(take_action_col)
-        reject_reason_letter = get_column_letter(reject_reason_col)
-        additional_letter = get_column_letter(additional_info_col)
-        send_to_letter = get_column_letter(send_to_col)
+        take_action_idx = headers.index("Take Action") + 1
+        reject_reason_idx = headers.index("Reject Reason") + 1
+        additional_idx = headers.index("Additional Scoring Information") + 1
+        send_to_idx = headers.index("Send to") + 1
         
-        # Highlight "Reject Reason" when Take Action = "Reject"
+        take_action_letter = get_column_letter(take_action_idx)
+        reject_reason_letter = get_column_letter(reject_reason_idx)
+        additional_letter = get_column_letter(additional_idx)
+        send_to_letter = get_column_letter(send_to_idx)
+        
         for row in range(2, last_row + 1):
+            # Highlight Reject Reason
             rule1 = FormulaRule(
                 formula=[f'${take_action_letter}{row}="Reject"'],
                 stopIfTrue=False,
                 fill=highlight_yellow
             )
             worksheet.conditional_formatting.add(f"{reject_reason_letter}{row}", rule1)
-        
-        # Highlight "Additional Scoring Information" and "Send to" when Take Action = "MQL - Send to Sales"
-        for row in range(2, last_row + 1):
+            
+            # Highlight Additional Scoring Info and Send to
             rule2 = FormulaRule(
                 formula=[f'${take_action_letter}{row}="MQL - Send to Sales"'],
                 stopIfTrue=False,
@@ -604,23 +421,8 @@ class ExcelWriter:
             worksheet.conditional_formatting.add(f"{additional_letter}{row}", rule2)
             worksheet.conditional_formatting.add(f"{send_to_letter}{row}", rule2)
     
-    """
-    def _format_headers(self, worksheet):
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF")
-        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = header_alignment
-        
-        # Set header row height
-        worksheet.row_dimensions[1].height = 30
-        """
-    
     def _adjust_column_widths(self, worksheet):
-        """Auto-adjust column widths based on content."""
+        """Auto-adjust column widths."""
         for column in worksheet.columns:
             max_length = 0
             column_letter = column[0].column_letter
@@ -634,41 +436,3 @@ class ExcelWriter:
             
             adjusted_width = min(max_length + 3, 50)
             worksheet.column_dimensions[column_letter].width = adjusted_width
-
-
-    def _make_links_clickable(self, worksheet, column_name: str):
-        """Make URLs in a specific column clickable.
-        
-        Args:
-            worksheet: The worksheet to update
-            column_name: Name of the column containing URLs
-        """
-        # Find the column index
-        header_row = 1
-        link_col = None
-        
-        for col in range(1, worksheet.max_column + 1):
-            cell_value = worksheet.cell(row=header_row, column=col).value
-            if cell_value == column_name:
-                link_col = col
-                break
-        
-        if link_col is None:
-            return
-        
-        link_col_letter = get_column_letter(link_col)
-        
-        # Style for hyperlinks
-        link_font = Font(color="0000FF", underline="single")
-        
-        # Make each URL clickable
-        for row in range(2, worksheet.max_row + 1):
-            cell = worksheet.cell(row=row, column=link_col)
-            url = cell.value
-            
-            if url and isinstance(url, str) and url.startswith("http"):
-                # Set hyperlink
-                cell.hyperlink = url
-                cell.value = url
-                cell.font = link_font
-                cell.style = "Hyperlink"

@@ -1,11 +1,18 @@
+"""
+Outlook Client
+Handles Outlook connection and email fetching.
+"""
+
 import sys
 from datetime import datetime, timedelta
 from typing import List, Tuple
 import win32com.client
 
-
 class OutlookClient:
+    """Client for interacting with Outlook."""
+    
     def __init__(self):
+        """Initialize Outlook connection."""
         self.outlook = win32com.client.Dispatch("Outlook.Application")
         self.namespace = self.outlook.GetNamespace("MAPI")
     
@@ -88,7 +95,13 @@ class OutlookClient:
                     print("Invalid input.")
     
     def parse_date_input(self, date_str: str) -> List[Tuple[datetime, datetime]]:
-        """Parse date string into list of (start, end) tuples."""
+        """Parse date string into list of (start, end) tuples.
+        
+        Supports:
+            - Single date: 2024-01-15
+            - Multiple dates: 2024-01-15,2024-01-16
+            - Range: 2024-01-15 to 2024-01-20
+        """
         ranges = []
         
         def to_range(date):

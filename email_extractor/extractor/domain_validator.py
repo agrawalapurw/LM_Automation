@@ -1,9 +1,13 @@
+"""
+Domain Validator
+Validates if email domain matches company name.
+"""
+
 import re
-from typing import Dict
 import socket
+from typing import Dict
 
-
-# Free email domains
+# Free email domains (fallback if validation data not loaded)
 FREE_MAILERS = {
     "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com",
     "aol.com", "icloud.com", "mail.com", "proton.me", "protonmail.com",
@@ -11,9 +15,16 @@ FREE_MAILERS = {
     "mail.ru", "163.com", "126.com", "sina.com", "sohu.com"
 }
 
-
 class DomainValidator:
     """Validate if email domain matches company name."""
+    
+    def __init__(self, validation_loader=None):
+        """Initialize validator.
+        
+        Args:
+            validation_loader: Optional ValidationDataLoader instance
+        """
+        self.validation_loader = validation_loader
     
     def extract_domain(self, email: str) -> str:
         """Extract domain from email address."""
@@ -27,7 +38,6 @@ class DomainValidator:
         if not text:
             return ""
         
-        # Convert to lowercase
         text = str(text).lower()
         
         # Remove common company suffixes
@@ -38,7 +48,6 @@ class DomainValidator:
         ]
         
         for suffix in suffixes:
-            # Remove as whole word
             text = re.sub(rf'\b{suffix}\b', '', text)
         
         # Remove special characters, keep only alphanumeric
@@ -47,27 +56,19 @@ class DomainValidator:
         return text.strip()
     
     def extract_main_domain(self, domain: str) -> str:
-        """Extract main domain without subdomains and TLD.
-        
-        Example: mail.company.co.uk -> company
-        """
+        """Extract main domain without subdomains and TLD."""
         if not domain:
             return ""
         
-        # Remove common subdomains
         parts = domain.split('.')
         
-        # If we have subdomain.domain.tld or domain.tld
+        # Skip common subdomains
         if len(parts) >= 2:
-            # Skip common subdomains
             if parts[0] in ['mail', 'email', 'webmail', 'smtp', 'pop', 'imap', 'www']:
                 parts = parts[1:]
         
-        # Get the domain name (second to last part usually)
-        # For domain.tld -> take 'domain'
-        # For domain.co.uk -> take 'domain'
+        # Get the domain name
         if len(parts) >= 2:
-            # Check if second-to-last is a short TLD part (co, com, ac, etc.)
             if len(parts) >= 3 and len(parts[-2]) <= 3:
                 return parts[-3]  # For .co.uk, .com.au, etc.
             return parts[-2]  # For .com, .de, .org, etc.
@@ -76,52 +77,27 @@ class DomainValidator:
     
     def is_free_mailer(self, domain: str) -> bool:
         """Check if domain is a free email provider."""
+        # Check validation loader first
+        if self.validation_loader and self.validation_loader.is_freemail_domain(domain):
+            return True
+        
+        # Fallback to hardcoded list
         return domain.lower() in FREE_MAILERS
     
-    def check_domain_accessibility(self, domain: str) -> bool:
-        """Check if domain is accessible (has DNS records).
-        
-        Returns True if domain appears to be valid/accessible.
-        """
-        if not domain:
-            return False
-        
-        try:
-            # Try to resolve domain
-            socket.gethostbyname(domain)
-            return True
-        except socket.gaierror:
-            # Domain doesn't resolve
-            return False
-        except Exception:
-            # Other errors, assume accessible to be safe
-            return True
-    
     def calculate_similarity(self, str1: str, str2: str) -> float:
-        """Calculate simple similarity score between two strings.
-        
-        Returns value between 0.0 and 1.0
-        """
+        """Calculate similarity score between two strings (0.0 to 1.0)."""
         if not str1 or not str2:
             return 0.0
         
-        # Exact match
         if str1 == str2:
             return 1.0
         
-        # One contains the other
         if str1 in str2 or str2 in str1:
             return 0.8
         
-        # Check for common substring
-        min_len = min(len(str1), len(str2))
+        # Count matching characters
+        matches = sum(1 for i in range(min(len(str1), len(str2))) if str1[i] == str2[i])
         max_len = max(len(str1), len(str2))
-        
-        # Count matching characters in order
-        matches = 0
-        for i in range(min(len(str1), len(str2))):
-            if str1[i] == str2[i]:
-                matches += 1
         
         return matches / max_len if max_len > 0 else 0.0
     
@@ -130,13 +106,12 @@ class DomainValidator:
         
         Returns:
             dict with keys:
-                - status: str (Valid Company Domain / Mismatch / Free Mailer / etc.)
-                - details: str (explanation)
-                - confidence: str (high/medium/low)
+                - status: str
+                - details: str
+                - confidence: str
         """
         domain = self.extract_domain(email)
         
-        # Check if empty
         if not domain:
             return {
                 "status": "No Email Domain",
@@ -159,48 +134,41 @@ class DomainValidator:
                 "confidence": "high"
             }
         
-        # Normalize company name and domain
+        # Check if excluded domain
+        if self.validation_loader and self.validation_loader.is_excluded_domain(domain):
+            return {
+                "status": "Excluded Domain",
+                "details": f"Domain is in excluded list: {domain}",
+                "confidence": "high"
+            }
+        
+        # Normalize and compare
         company_normalized = self.normalize_name(company)
         domain_main = self.extract_main_domain(domain)
         domain_normalized = self.normalize_name(domain_main)
         
-        # Check similarity
         similarity = self.calculate_similarity(company_normalized, domain_normalized)
         
-        # High similarity - likely a match
+        # High similarity
         if similarity >= 0.8:
-            # Check if domain is accessible
-            is_accessible = self.check_domain_accessibility(domain)
-            
-            if is_accessible:
-                return {
-                    "status": "Valid Company Domain",
-                    "details": f"Domain matches company: {company} → {domain}",
-                    "confidence": "high"
-                }
-            else:
-                return {
-                    "status": "Matching Domain - Not Accessible",
-                    "details": f"Domain matches but not accessible: {domain}",
-                    "confidence": "medium"
-                }
+            return {
+                "status": "Valid Company Domain",
+                "details": f"Domain matches company: {company} → {domain}",
+                "confidence": "high"
+            }
         
-        # Medium similarity - possible match
+        # Medium similarity
         elif similarity >= 0.5:
-            is_accessible = self.check_domain_accessibility(domain)
-            
             return {
                 "status": "Possible Domain Match",
-                "details": f"Partial match: {company} ≈ {domain} (accessibility: {'yes' if is_accessible else 'no'})",
+                "details": f"Partial match: {company} ≈ {domain}",
                 "confidence": "medium"
             }
         
-        # Low similarity - mismatch
+        # Low similarity
         else:
-            is_accessible = self.check_domain_accessibility(domain)
-            
             return {
                 "status": "Domain Mismatch",
-                "details": f"Company and domain don't match: {company} ≠ {domain} (domain accessible: {'yes' if is_accessible else 'no'})",
+                "details": f"Company and domain don't match: {company} ≠ {domain}",
                 "confidence": "high"
             }

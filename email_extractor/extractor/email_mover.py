@@ -1,15 +1,24 @@
+"""
+Email Mover
+Moves emails to appropriate folders based on rules.
+"""
+
 import re
 from typing import List, Dict
-
 
 class EmailMover:
     """Move emails to appropriate folders based on rules."""
     
     def __init__(self, outlook_client):
+        """Initialize email mover.
+        
+        Args:
+            outlook_client: OutlookClient instance
+        """
         self.outlook = outlook_client
         self.move_log = []
     
-    def find_folder_recursive(self, root_folder, target_name, max_depth=5, current_depth=0):
+    def find_folder_recursive(self, root_folder, target_name: str, max_depth: int = 5, current_depth: int = 0):
         """Recursively search for a folder by name."""
         if current_depth > max_depth:
             return None
@@ -17,11 +26,9 @@ class EmailMover:
         try:
             for folder in root_folder.Folders:
                 folder_name = folder.Name.strip()
-                # Check if this is the MQL folder
                 if target_name.upper() in folder_name.upper():
                     return folder
                 
-                # Search in subfolders
                 result = self.find_folder_recursive(folder, target_name, max_depth, current_depth + 1)
                 if result:
                     return result
@@ -30,35 +37,19 @@ class EmailMover:
         
         return None
     
-    def list_all_folders(self, root_folder, indent=0, max_depth=3, current_depth=0):
-        """List all folders for debugging."""
-        if current_depth > max_depth:
-            return
-        
-        try:
-            for folder in root_folder.Folders:
-                print("  " * indent + f"└─ {folder.Name}")
-                self.list_all_folders(folder, indent + 1, max_depth, current_depth + 1)
-        except Exception as e:
-            print(f"Error listing folders: {e}")
-    
     def get_mql_subfolders(self, root_folder):
         """Navigate to MQL folder and get its subfolders."""
         print("\nSearching for MQL folder...")
-        print("Available folders:")
-        self.list_all_folders(root_folder, indent=1)
         
-        # Try to find MQL folder
         mql_folder = self.find_folder_recursive(root_folder, "1. MQL")
         
         if not mql_folder:
             print("\n✗ Could not find 'MQL' folder automatically.")
-            return self.manual_folder_selection(root_folder)
+            return {}
         
         print(f"\n✓ Found MQL folder: {mql_folder.Name}")
         print("\nSubfolders in MQL:")
         
-        # Get subfolders
         subfolders = {}
         try:
             for subfolder in mql_folder.Folders:
@@ -85,71 +76,6 @@ class EmailMover:
         
         return subfolders
     
-    def manual_folder_selection(self, root_folder):
-        """Allow user to manually navigate to MQL folder."""
-        print("\nLet's navigate to the MQL folder manually.")
-        current = root_folder
-        path = [current]
-        
-        while True:
-            print(f"\nCurrent: {current.Name}")
-            
-            try:
-                subfolders = list(current.Folders)
-            except:
-                subfolders = []
-            
-            if not subfolders:
-                print("No subfolders found.")
-                if len(path) > 1:
-                    cmd = input("Press 'u' to go up, 'q' to quit: ").strip().lower()
-                    if cmd == 'u':
-                        path.pop()
-                        current = path[-1]
-                    else:
-                        return {}
-                else:
-                    return {}
-                continue
-            
-            print("Subfolders:")
-            for i, folder in enumerate(subfolders, 1):
-                print(f"  [{i}] {folder.Name}")
-            
-            cmd = input("\nEnter number to open, 's' if this is MQL folder, 'u' to go up, 'q' to quit: ").strip().lower()
-            
-            if cmd == 's':
-                # This is the MQL folder, get its subfolders
-                subfolders_dict = {}
-                for subfolder in subfolders:
-                    name = subfolder.Name.strip()
-                    name_upper = name.upper()
-                    
-                    if "ARROW" in name_upper:
-                        subfolders_dict["ARROW"] = subfolder
-                    elif "FUTURE" in name_upper:
-                        subfolders_dict["FUTURE"] = subfolder
-                    elif "RUTRONIK" in name_upper:
-                        subfolders_dict["RUTRONIK"] = subfolder
-                    elif "OTHER" in name_upper and "DISTRIBUTION" in name_upper:
-                        subfolders_dict["OTHER DISTRIBUTION PARTNERS"] = subfolder
-                
-                return subfolders_dict
-            elif cmd == 'u':
-                if len(path) > 1:
-                    path.pop()
-                    current = path[-1]
-            elif cmd == 'q':
-                return {}
-            else:
-                try:
-                    idx = int(cmd) - 1
-                    if 0 <= idx < len(subfolders):
-                        current = subfolders[idx]
-                        path.append(current)
-                except:
-                    print("Invalid input.")
-    
     def determine_target_folder(self, row: Dict[str, str]) -> tuple:
         """Determine which folder the email should be moved to.
         
@@ -163,10 +89,8 @@ class EmailMover:
         if has_contact_form != "No":
             return (None, f"Skipped - Has Contact Sales Form: {has_contact_form}")
         
-        # Normalize potential partner value
         partner_upper = potential_partner.upper()
         
-        # Skip if empty or just "?"
         if not potential_partner or potential_partner == "?":
             return (None, f"Skipped - No distribution partner identified")
         
@@ -177,10 +101,9 @@ class EmailMover:
             return ("FUTURE", f"Moved to Future folder - Partner: {potential_partner}")
         elif "RUTRONIK" in partner_upper:
             return ("RUTRONIK", f"Moved to Rutronik folder - Partner: {potential_partner}")
-        elif "AVNET" in partner_upper:
-            return (None, f"Skipped - AVNET partner")
+        elif "AVNET" in partner_upper or "EBV" in partner_upper:
+            return ("EBV/AVNET", f"Moved to EBV/Avnet folder - Partner: {potential_partner}")
         else:
-            # Any other distribution partner
             return ("OTHER DISTRIBUTION PARTNERS", f"Moved to Other Distribution Partners folder - Partner: {potential_partner}")
         
         return (None, "Skipped - No matching criteria")
@@ -200,21 +123,21 @@ class EmailMover:
         Returns:
             dict: Mapping of email index to status information
         """
-        status_map = {}  # Maps index to (status, action)
+        status_map = {}
         
         if not subfolders:
             print("No subfolders available for moving emails")
-            # Mark all as not processed
             for i in range(len(emails)):
                 status_map[i] = ("Not Started", "Email moving disabled - No MQL subfolders found")
             return status_map
         
-        # Create folder mapping
         folder_map = {
             "ARROW": subfolders.get("ARROW"),
             "FUTURE": subfolders.get("FUTURE"),
             "RUTRONIK": subfolders.get("RUTRONIK"),
             "OTHER DISTRIBUTION PARTNERS": subfolders.get("OTHER DISTRIBUTION PARTNERS"),
+            "EBV/AVNET": subfolders.get("EBV/AVNET"),
+            "NON EBV LEADS": subfolders.get("NON EBV LEADS"),
         }
         
         print("\nFolder mapping:")
@@ -222,12 +145,13 @@ class EmailMover:
             status = "✓" if folder else "✗"
             print(f"  {status} {name}: {folder.Name if folder else 'NOT FOUND'}")
         
-        # Track statistics
         stats = {
             "ARROW": 0,
             "FUTURE": 0,
             "RUTRONIK": 0,
             "OTHER DISTRIBUTION PARTNERS": 0,
+            "EBV/AVNET": 0,
+            "NON EBV LEADS": 0,
             "SKIPPED": 0,
             "FAILED": 0
         }
@@ -238,7 +162,6 @@ class EmailMover:
             target_name, action_desc = self.determine_target_folder(row_data)
             
             if not target_name:
-                # Email was skipped
                 stats["SKIPPED"] += 1
                 status_map[i] = ("Not Started", action_desc)
                 continue
@@ -246,14 +169,12 @@ class EmailMover:
             target_folder = folder_map.get(target_name)
             
             if not target_folder:
-                # Folder not found
                 action = f"Failed - Target folder '{target_name}' not found"
                 print(f"Warning: {action}")
                 stats["FAILED"] += 1
                 status_map[i] = ("Failed", action)
                 continue
             
-            # Move the email
             subject = row_data.get("Subject", "Unknown")
             
             if self.move_email(email_item, target_folder):
@@ -284,7 +205,9 @@ class EmailMover:
         print(f"  Arrow:                       {stats['ARROW']}")
         print(f"  Future:                      {stats['FUTURE']}")
         print(f"  Rutronik:                    {stats['RUTRONIK']}")
+        print(f"  EBV/Avnet:                   {stats['EBV/AVNET']}")
         print(f"  Other Distribution Partners: {stats['OTHER DISTRIBUTION PARTNERS']}")
+        print(f"  Non-EBV Leads:               {stats['NON EBV LEADS']}")
         print(f"  Skipped:                     {stats['SKIPPED']}")
         print(f"  Failed:                      {stats['FAILED']}")
         print("=" * 60)

@@ -1,14 +1,17 @@
+"""
+Email Parser
+Parses Outlook email items into structured data.
+"""
+
 import re
 from typing import Dict
 from urllib.parse import urlparse, parse_qs, unquote
-from extractor.university_detector import UniversityDetector
 
 try:
     from bs4 import BeautifulSoup
     HAS_BS4 = True
 except ImportError:
     HAS_BS4 = False
-
 
 EMAIL_PATTERN = re.compile(r'([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})', re.I)
 URL_PATTERN = re.compile(r'https?://[^\s"\'>]+', re.I)
@@ -32,6 +35,8 @@ FIELDS = [
     "Status",
     "Action Taken",
     "Company Domain Validation",
+    "Validation Status",
+    "Validation Reason",
     "Take Action",
     "Valid Company → Reject Reason",
     "Invalid Company Reason",
@@ -40,13 +45,21 @@ FIELDS = [
     "Send to",
     "Move to Folder",
     "Form Submission Status",
-    "Email Move Status"  # NEW
+    "Email Move Status"
 ]
 
-
 class EmailParser:
-    def __init__(self):
-        self.university_detector = UniversityDetector()
+    """Parse Outlook email items into structured data."""
+    
+    def __init__(self, university_detector=None, validation_loader=None):
+        """Initialize parser.
+        
+        Args:
+            university_detector: UniversityDetector instance
+            validation_loader: ValidationDataLoader instance
+        """
+        self.university_detector = university_detector
+        self.validation_loader = validation_loader
     
     def parse_email(self, email_item) -> Dict[str, str]:
         """Parse Outlook email item into structured data."""
@@ -76,22 +89,42 @@ class EmailParser:
             if field not in row:
                 row[field] = data.get(field, "")
         
-        # Check for contact_sales_forms
-        row["Has Contact Sales Form"] = self._check_contact_sales_form(row.get("Lead Triggering Activities", ""))
+        # Check for contact sales form
+        row["Has Contact Sales Form"] = self._check_contact_sales_form(
+            row.get("Lead Triggering Activities", "")
+        )
         
-        # NEW: Check for university
+        # Get key fields for validation
         company = row.get("Company", "")
         country = row.get("Country", "")
         email = row.get("Email Address", "")
         
-        university_result = self.university_detector.is_university(company, country, email)
+        # Run validation checks
+        if self.validation_loader:
+            validation_result = self.validation_loader.validate_lead(company, country, email)
+            
+            if not validation_result["is_valid"]:
+                row["Status"] = validation_result["validation_type"]
+                row["Action Taken"] = validation_result["reason"]
+                row["Validation Status"] = "Invalid"
+                row["Validation Reason"] = validation_result["reason"]
+            else:
+                row["Validation Status"] = "Valid"
+                row["Validation Reason"] = validation_result.get("reason", "")
         
-        if university_result["is_university"]:
-            row["Status"] = "University Contact"
-            row["Action Taken"] = f"Identified as university - {university_result['reason']} (Confidence: {university_result['confidence']})"
-        else:
-            # Will be updated by email mover if applicable
+        # Check for university (only if not already marked invalid)
+        if row.get("Status", "") == "" and self.university_detector:
+            university_result = self.university_detector.is_university(company, country, email)
+            
+            if university_result["is_university"]:
+                row["Status"] = "University Contact"
+                row["Action Taken"] = f"Identified as university - {university_result['reason']}"
+        
+        # Default status if still empty
+        if not row.get("Status"):
             row["Status"] = "Not Started"
+        
+        if not row.get("Action Taken"):
             row["Action Taken"] = ""
         
         return row
@@ -101,23 +134,14 @@ class EmailParser:
         if not triggering_activities:
             return "No"
         
-        # Check for various patterns
         lower_activities = triggering_activities.lower()
-        
         patterns = [
-            "contact_sales_forms",
-            "contact sales forms",
-            "contact_sales_form",
-            "contact sales form",
-            "contactsalesforms",
-            "contactsalesform"
+            "contact_sales_forms", "contact sales forms",
+            "contact_sales_form", "contact sales form",
+            "contactsalesforms", "contactsalesform"
         ]
         
-        for pattern in patterns:
-            if pattern in lower_activities:
-                return "Yes"
-        
-        return "No"
+        return "Yes" if any(p in lower_activities for p in patterns) else "No"
     
     def _parse_html(self, html: str) -> Dict[str, str]:
         """Extract fields from HTML body."""
@@ -140,9 +164,7 @@ class EmailParser:
                         else:
                             data[label] = value
                     elif value:
-                        # Clean the value
-                        cleaned_value = self._clean_value(value)
-                        data[label] = cleaned_value
+                        data[label] = self._clean_value(value)
         
         # Extract links
         for anchor in soup.find_all("a"):
@@ -168,41 +190,30 @@ class EmailParser:
         buffer = []
         
         for line in lines:
-            # Stop at Copyright
             if line.startswith("Copyright"):
                 break
             
-            # Check if line is a field label
             normalized = self._normalize_label(line)
             if normalized in FIELDS:
-                # Save previous field
                 if current_field and buffer:
-                    value = "\n".join(buffer).strip()
-                    cleaned_value = self._clean_value(value)
-                    data[current_field] = cleaned_value
+                    data[current_field] = self._clean_value("\n".join(buffer).strip())
                 current_field = normalized
                 buffer = []
             elif current_field:
                 buffer.append(line)
         
-        # Save last field
         if current_field and buffer:
-            value = "\n".join(buffer).strip()
-            cleaned_value = self._clean_value(value)
-            data[current_field] = cleaned_value
+            data[current_field] = self._clean_value("\n".join(buffer).strip())
         
         # Split PreMQL link and Company Matching Status
         if "PreMQL review/validation link" in data:
             value = data["PreMQL review/validation link"]
-            # Check if it contains "Company Matching Status"
             if "Company Matching Status" in value:
                 parts = value.split("\n")
-                # First part is the URL
-                url_part = parts[0].strip()
-                data["PreMQL review/validation link"] = url_part
-                # Everything after is Company Matching Status
+                data["PreMQL review/validation link"] = parts[0].strip()
                 if len(parts) > 1:
-                    status_parts = [p.strip() for p in parts[1:] if p.strip() and "Company Matching Status" not in p]
+                    status_parts = [p.strip() for p in parts[1:] 
+                                   if p.strip() and "Company Matching Status" not in p]
                     if status_parts:
                         data["Company Matching Status"] = status_parts[0]
         
@@ -219,38 +230,29 @@ class EmailParser:
         return data
     
     def _clean_value(self, value: str) -> str:
-        """Clean extracted value from unwanted content."""
+        """Clean extracted value."""
         if not value:
             return ""
         
-        # Remove everything after Copyright
         if "Copyright" in value:
             value = value.split("Copyright")[0].strip()
         
-        # Remove Oracle footer patterns
         value = re.sub(r'Copyright.*?All rights reserved\.?', '', value, flags=re.DOTALL | re.IGNORECASE)
         value = re.sub(r'Oracle and/or its affiliates\.?', '', value, flags=re.IGNORECASE)
-        
-        # Remove image URLs and tracking pixels
         value = re.sub(r'<https?://[^>]+>', '', value)
         value = re.sub(r'https?://[^\s]*tinydot\.gif[^\s]*', '', value)
         value = re.sub(r'https?://img\d+\.en25\.com[^\s]*', '', value)
         
-        # Remove "Company Matching Status" label if it's standalone
         if value.strip() == "Company Matching Status":
             return ""
         
-        # Clean up whitespace
         lines = [l.strip() for l in value.splitlines() if l.strip()]
-        value = "\n".join(lines)
-        
-        return value.strip()
+        return "\n".join(lines).strip()
     
     def _normalize_label(self, text: str) -> str:
         """Normalize field label."""
         text = text.replace(":", "").strip()
         
-        # Map aliases
         aliases = {
             "lead qualification link": "PreMQL review/validation link",
             "qualification link": "PreMQL review/validation link",
@@ -261,7 +263,6 @@ class EmailParser:
         if lower in aliases:
             return aliases[lower]
         
-        # Match canonical label
         for field in FIELDS:
             if lower == field.lower():
                 return field
@@ -274,12 +275,10 @@ class EmailParser:
             parsed = urlparse(url)
             qs = parse_qs(parsed.query)
             
-            # Outlook SafeLinks
             if "safelinks.protection.outlook.com" in parsed.netloc:
                 if "url" in qs:
                     return unquote(qs["url"][0])
             
-            # Generic unwrap
             for key in ["url", "u", "redirect", "target"]:
                 if key in qs and qs[key][0].startswith("http"):
                     return unquote(qs[key][0])

@@ -1,3 +1,8 @@
+"""
+Main Entry Point
+Email extraction and processing workflow.
+"""
+
 import os
 from datetime import timedelta
 import pandas as pd
@@ -5,61 +10,44 @@ from extractor.outlook import OutlookClient
 from extractor.parser import EmailParser
 from extractor.excel_writer import ExcelWriter
 from extractor.email_mover import EmailMover
-
+from extractor.domain_validator import DomainValidator
+from extractor.university_detector import UniversityDetector
+from extractor.validation_data import ValidationDataLoader
 
 DEFAULT_FILTERS = ["Pre-MQL ready for review", "Pre-MQL ready for validation"]
 
-
 def get_date_label(ranges):
-    """Generate filename label from date ranges.
-    
-    Examples:
-        Single date: Extraction_13Jan24
-        Range: Extraction_13to16Jan24
-        Cross-month: Extraction_28Janto2Feb24
-    """
+    """Generate filename label from date ranges."""
     if not ranges:
         return "Extraction_selection"
     
     sorted_ranges = sorted(ranges, key=lambda x: x[0])
     
-    # Single date
     if len(sorted_ranges) == 1:
         start, end = sorted_ranges[0]
         if (end - start) == timedelta(days=1):
-            # Format: 13Jan24
             return f"Extraction_{start.strftime('%d%b%y')}"
         
-        # Date range (same start and end)
         end_inclusive = end - timedelta(days=1)
         
-        # Check if same month
         if start.month == end_inclusive.month and start.year == end_inclusive.year:
-            # Format: Extraction_13to16Jan24
             return f"Extraction_{start.strftime('%d')}to{end_inclusive.strftime('%d%b%y')}"
         else:
-            # Different months: Extraction_28Janto2Feb24
             return f"Extraction_{start.strftime('%d%b')}to{end_inclusive.strftime('%d%b%y')}"
     
-    # Multiple non-consecutive dates
-    # Use first and last date
     first_date = sorted_ranges[0][0]
     last_date = sorted_ranges[-1][0]
     
     if first_date.month == last_date.month and first_date.year == last_date.year:
-        # Same month: Extraction_5to13Jan24
         return f"Extraction_{first_date.strftime('%d')}to{last_date.strftime('%d%b%y')}"
     else:
-        # Different months: Extraction_28Decto5Jan24
         return f"Extraction_{first_date.strftime('%d%b')}to{last_date.strftime('%d%b%y')}"
-
 
 def ensure_output_dir():
     """Create output directory if it doesn't exist."""
     output_dir = os.path.join(os.path.dirname(__file__), "output")
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
-
 
 def get_unique_path(directory, base_name):
     """Generate unique filename if file exists."""
@@ -74,16 +62,23 @@ def get_unique_path(directory, base_name):
             return path
         counter += 1
 
-
 def main():
     print("=" * 60)
     print("EMAIL EXTRACTOR - Pre-MQL Tool")
     print("=" * 60)
+    
+    # Load validation data
+    print("\nLoading validation data...")
+    validation_data_dir = os.path.join(os.path.dirname(__file__), "validation_data")
+    validation_loader = ValidationDataLoader(validation_data_dir)
+    
     print("\nConnecting to Outlook...")
     
     # Initialize components
     outlook = OutlookClient()
-    parser = EmailParser()
+    domain_validator = DomainValidator(validation_loader)
+    university_detector = UniversityDetector(validation_loader)
+    parser = EmailParser(university_detector, validation_loader)
     
     # Select store and folder
     store = outlook.select_store()
@@ -120,7 +115,7 @@ def main():
     print(f"Found {len(emails)} emails. Parsing...")
     rows = [parser.parse_email(email) for email in emails]
     
-    # Move emails if requested and update status
+    # Move emails if requested
     status_map = {}
     if move_emails:
         mover = EmailMover(outlook)
@@ -131,38 +126,33 @@ def main():
             status_map = mover.process_emails(emails, rows, subfolders)
         else:
             print("\nCould not find MQL subfolders. Skipping email moving.")
-            # Mark all as not processed
             for i in range(len(rows)):
                 status_map[i] = ("Not Started", "Email moving was skipped")
     else:
-        # Mark all as not processed
         for i in range(len(rows)):
             status_map[i] = ("Not Started", "Email moving was not requested")
     
-    # Update rows with status information (without overriding existing statuses)
+    # Update rows with status (preserve protected statuses)
+    protected_statuses = ["University Contact", "Completed", "Academic", "Excluded Domain", 
+                          "Direct Account", "Country"]
+    
     for i, row in enumerate(rows):
-        # Define protected statuses that should never be overwritten
-        protected_statuses = ["University Contact", "Completed"]
         current_status = row.get("Status", "")
         
-        # Only update if not protected
         if current_status not in protected_statuses:
             if i in status_map:
                 status, action = status_map[i]
                 row["Status"] = status
                 row["Action Taken"] = action
-            elif not current_status:  # Only set default if completely empty
+            elif not current_status:
                 row["Status"] = "Not Started"
                 row["Action Taken"] = "No action taken"
     
     # Create DataFrame
     df = pd.DataFrame(rows)
     
-    # NEW: Validate company domains for ALL rows
+    # Validate company domains
     print("\nValidating company domains...")
-    from extractor.domain_validator import DomainValidator
-    domain_validator = DomainValidator()
-    
     validation_results = []
     for _, row in df.iterrows():
         company = row.get("Company", "")
@@ -180,12 +170,9 @@ def main():
         print("No emails matched 'validation' or 'review' subjects.")
         return
     
-    # For Review sheet, check Account Type = "Mass Market" (without overriding protected statuses)
+    # Mark Mass Market in Review sheet
     if not df_review.empty:
         mass_market_mask = df_review["Account Type"].str.contains("mass market", case=False, na=False)
-        
-        # Only update rows that don't already have a protected status
-        protected_statuses = ["University Contact", "Completed"]
         
         mass_market_updated = 0
         for idx in df_review[mass_market_mask].index:
@@ -195,11 +182,8 @@ def main():
                 df_review.at[idx, "Action Taken"] = "Identified as Mass Market account"
                 mass_market_updated += 1
         
-        mass_market_count = mass_market_mask.sum()
         if mass_market_updated > 0:
             print(f"\n✓ Identified {mass_market_updated} Mass Market accounts in Review sheet")
-            if mass_market_count > mass_market_updated:
-                print(f"  (Note: {mass_market_count - mass_market_updated} Mass Market rows kept existing status)")
     
     # Save to Excel
     output_dir = ensure_output_dir()
