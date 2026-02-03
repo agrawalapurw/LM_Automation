@@ -101,12 +101,12 @@ class EmailMover:
             return ("FUTURE", f"Moved to Future folder - Partner: {potential_partner}")
         elif "RUTRONIK" in partner_upper:
             return ("RUTRONIK", f"Moved to Rutronik folder - Partner: {potential_partner}")
-        elif "AVNET" in partner_upper or "EBV" in partner_upper:
-            return ("EBV/AVNET", f"Moved to EBV/Avnet folder - Partner: {potential_partner}")
+        #elif "AVNET" in partner_upper or "EBV" in partner_upper:
+        #    return ("EBV/AVNET", f"Moved to EBV/Avnet folder - Partner: {potential_partner}")
         else:
             return ("OTHER DISTRIBUTION PARTNERS", f"Moved to Other Distribution Partners folder - Partner: {potential_partner}")
         
-        return (None, "Skipped - No matching criteria")
+            return (None, "Skipped - No matching criteria")
     
     def move_email(self, email_item, target_folder):
         """Move an email to the target folder."""
@@ -136,8 +136,8 @@ class EmailMover:
             "FUTURE": subfolders.get("FUTURE"),
             "RUTRONIK": subfolders.get("RUTRONIK"),
             "OTHER DISTRIBUTION PARTNERS": subfolders.get("OTHER DISTRIBUTION PARTNERS"),
-            "EBV/AVNET": subfolders.get("EBV/AVNET"),
-            "NON EBV LEADS": subfolders.get("NON EBV LEADS"),
+            #"EBV/AVNET": subfolders.get("EBV/AVNET"),
+            #"NON EBV LEADS": subfolders.get("NON EBV LEADS"),
         }
         
         print("\nFolder mapping:")
@@ -150,8 +150,8 @@ class EmailMover:
             "FUTURE": 0,
             "RUTRONIK": 0,
             "OTHER DISTRIBUTION PARTNERS": 0,
-            "EBV/AVNET": 0,
-            "NON EBV LEADS": 0,
+            #"EBV/AVNET": 0,
+            #"NON EBV LEADS": 0,
             "SKIPPED": 0,
             "FAILED": 0
         }
@@ -205,9 +205,9 @@ class EmailMover:
         print(f"  Arrow:                       {stats['ARROW']}")
         print(f"  Future:                      {stats['FUTURE']}")
         print(f"  Rutronik:                    {stats['RUTRONIK']}")
-        print(f"  EBV/Avnet:                   {stats['EBV/AVNET']}")
+        #print(f"  EBV/Avnet:                   {stats['EBV/AVNET']}")
         print(f"  Other Distribution Partners: {stats['OTHER DISTRIBUTION PARTNERS']}")
-        print(f"  Non-EBV Leads:               {stats['NON EBV LEADS']}")
+        #print(f"  Non-EBV Leads:               {stats['NON EBV LEADS']}")
         print(f"  Skipped:                     {stats['SKIPPED']}")
         print(f"  Failed:                      {stats['FAILED']}")
         print("=" * 60)

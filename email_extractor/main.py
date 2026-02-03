@@ -115,8 +115,9 @@ def main():
     print(f"Found {len(emails)} emails. Parsing...")
     rows = [parser.parse_email(email) for email in emails]
     
-    # Move emails if requested
+    # Move emails if requested - INITIALIZE status_map BEFORE if statement
     status_map = {}
+    
     if move_emails:
         mover = EmailMover(outlook)
         subfolders = mover.get_mql_subfolders(store)
@@ -134,7 +135,7 @@ def main():
     
     # Update rows with status (preserve protected statuses)
     protected_statuses = ["University Contact", "Completed", "Academic", "Excluded Domain", 
-                          "Direct Account", "Country"]
+                          "Direct Account", "Country", "Freemail"]
     
     for i, row in enumerate(rows):
         current_status = row.get("Status", "")
@@ -170,7 +171,7 @@ def main():
         print("No emails matched 'validation' or 'review' subjects.")
         return
     
-    # Mark Mass Market in Review sheet
+    # Mark Mass Market accounts in Review sheet
     if not df_review.empty:
         mass_market_mask = df_review["Account Type"].str.contains("mass market", case=False, na=False)
         
