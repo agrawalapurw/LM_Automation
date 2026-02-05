@@ -20,7 +20,8 @@ VALIDATION_FILTER_COLUMNS = [
     "Has Contact Sales Form",
     "Company Domain Validation",
     "Validation Status",
-    "Status"
+    "Status",
+    "Sold-to-Party Name",   # <-- added
 ]
 
 VALIDATION_INPUT_COLUMNS = [
@@ -43,7 +44,8 @@ REVIEW_FILTER_COLUMNS = [
     "Has Contact Sales Form",
     "Company Domain Validation",
     "Validation Status",
-    "Status"
+    "Status",
+    "Sold-to-Party Name",   # <-- added
 ]
 
 REVIEW_INPUT_COLUMNS = [

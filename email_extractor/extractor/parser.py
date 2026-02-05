@@ -2,11 +2,9 @@
 Email Parser
 Parses Outlook email items into structured data.
 """
-
 import re
 from typing import Dict
 from urllib.parse import urlparse, parse_qs, unquote
-
 try:
     from bs4 import BeautifulSoup
     HAS_BS4 = True
@@ -48,6 +46,7 @@ FIELDS = [
     "Email Move Status"
 ]
 
+
 class EmailParser:
     """Parse Outlook email items into structured data."""
     
@@ -68,6 +67,7 @@ class EmailParser:
         received = getattr(email_item, "ReceivedTime", None)
         body = getattr(email_item, "Body", "") or ""
         html = getattr(email_item, "HTMLBody", "") or ""
+        entry_id = getattr(email_item, "EntryID", "") or ""
         
         # Parse fields
         data = {}
@@ -83,6 +83,7 @@ class EmailParser:
             "Sender": sender,
             "ReceivedTime": self._format_datetime(received),
             "All Emails Found": "; ".join(sorted(set(self._find_emails(body)))),
+            "EntryID": entry_id,
         }
         
         for field in FIELDS:
